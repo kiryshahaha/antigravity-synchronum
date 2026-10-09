@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="ru" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Synchronum Dashboard</title>
+  <title>Synchronum — Google Antigravity 2.0 Sync</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -11,9 +11,10 @@
       theme: {
         extend: {
           colors: {
-            bg: '#0f172a',
-            surface: '#1e293b',
-            border: '#334155',
+            bg: '#0a0f1d',
+            surface: '#111827',
+            card: '#1f2937',
+            border: '#374151',
             accent: '#38bdf8',
           }
         }
@@ -22,138 +23,333 @@
   </script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    .glass { background: rgba(17, 24, 39, 0.85); backdrop-filter: blur(12px); }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen p-4 flex flex-col gap-4">
+<body class="bg-[#0b101b] text-slate-100 min-h-screen p-4 flex flex-col gap-4 text-xs">
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed top-4 right-4 z-50 transform transition-all duration-300 opacity-0 pointer-events-none translate-y-[-10px] px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 border text-xs font-medium"></div>
 
   <!-- Header -->
-  <header class="flex items-center justify-between border-b border-slate-800 pb-3">
-    <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 font-bold">
+  <header class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+    <div class="flex items-center gap-2.5">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center text-white text-base font-bold shadow-lg shadow-sky-500/20">
         🔄
       </div>
       <div>
-        <h1 class="text-sm font-semibold text-slate-100">Synchronum</h1>
-        <p class="text-xs text-slate-400">Google Antigravity 2.0 Sync</p>
+        <div class="flex items-center gap-1.5">
+          <h1 class="text-sm font-bold text-slate-100">Synchronum</h1>
+          <span class="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-400 text-[10px] font-mono border border-sky-500/30">v1.0</span>
+        </div>
+        <p class="text-[11px] text-slate-400">Синхронизация диалогов Antigravity 2.0</p>
       </div>
     </div>
-    <div id="status-badge" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
+    <div id="status-badge" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium">
       <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-      <span>Connected</span>
+      <span id="status-text">Ядро подключено</span>
     </div>
   </header>
 
-  <!-- Google Drive Card -->
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-3">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span class="text-base">☁️</span>
-        <span class="text-xs font-medium text-slate-200">Google Drive (appDataFolder)</span>
+  <!-- Quick Setup Banner (One-click Antigravity Install) -->
+  <section class="bg-gradient-to-r from-sky-950/60 via-slate-900 to-slate-900 border border-sky-800/50 rounded-xl p-3 flex items-center justify-between gap-3 shadow-md">
+    <div class="flex items-center gap-2.5">
+      <span class="text-xl">🧩</span>
+      <div>
+        <div class="font-semibold text-sky-300 text-xs">Интеграция в Antigravity 2.0 Sidecar</div>
+        <div class="text-[11px] text-slate-400">Добавить вкладку синхронизации в правую панель Antigravity</div>
       </div>
-      <span id="gdrive-status" class="text-xs text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">Pro Quota (5 TB)</span>
     </div>
-    
+    <button onclick="installSidecar()" id="btn-install-sidecar" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs whitespace-nowrap shadow-sm">
+      ⚡ Привязать в 1 клик
+    </button>
+  </section>
+
+  <!-- Security & Storage Settings -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <!-- E2EE Card -->
+    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-slate-200 flex items-center gap-1.5">
+          <span>🔒</span> Мастер-пароль (E2EE AES-256)
+        </span>
+        <span id="lock-indicator" class="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">Не задан</span>
+      </div>
+      <div class="flex gap-2">
+        <input type="password" id="master-password" placeholder="Введите ключ шифрования" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 flex-1 focus:outline-none focus:border-sky-500 placeholder-slate-600" />
+        <button onclick="saveMasterKey()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg transition border border-slate-700">
+          Сохранить
+        </button>
+      </div>
+      <div class="text-[10px] text-slate-500">Ключ используется для шифрования сессий перед отправкой в облако или файл.</div>
+    </div>
+
+    <!-- Google Drive Card -->
+    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-slate-200 flex items-center gap-1.5">
+          <span>☁️</span> Google Drive (appDataFolder)
+        </span>
+        <span id="gdrive-badge" class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Не подключен</span>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="connectGoogleDrive()" id="btn-gdrive-connect" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-1.5 px-2.5 rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5">
+          <span>🔑</span> Авторизовать Google Диск
+        </button>
+        <button onclick="pullCloud()" class="bg-sky-600 hover:bg-sky-500 text-white font-medium py-1.5 px-3 rounded-lg transition flex items-center justify-center gap-1">
+          <span>⬇️</span> Pull
+        </button>
+      </div>
+      <div class="text-[10px] text-slate-500">Используется изолированная квота Pro (до 5 ТБ) без доступа к личным файлам.</div>
+    </div>
+  </div>
+
+  <!-- Import Bundle Bar -->
+  <div class="bg-slate-900/70 border border-dashed border-slate-700 rounded-xl p-2.5 flex items-center justify-between gap-3">
     <div class="flex items-center gap-2">
-      <input type="password" id="master-password" placeholder="Enter E2EE Master Password" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 w-full focus:outline-none focus:border-sky-500 placeholder-slate-600" />
-      <button onclick="toggleLock()" id="btn-lock" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-700 transition">
-        🔒 Set Key
-      </button>
+      <span class="text-base">📦</span>
+      <div>
+        <div class="font-medium text-slate-200">Импортировать сессию из бандла</div>
+        <div class="text-[11px] text-slate-500">Восстановить `.bundle` или `.bundle.enc` с другого устройства</div>
+      </div>
+    </div>
+    <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition">
+      Выбрать файл
+      <input type="file" id="file-import" class="hidden" accept=".bundle,.enc" onchange="handleFileImport(event)" />
+    </label>
+  </div>
+
+  <!-- Conversations Section -->
+  <section class="flex-1 flex flex-col gap-2.5 min-h-0 bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="font-semibold text-slate-200 text-xs">Диалоги Antigravity</span>
+        <span id="session-count" class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full text-[10px] font-mono">0</span>
+      </div>
+      <div class="flex items-center gap-2 flex-1 max-w-[260px]">
+        <input type="text" id="search-input" oninput="filterSessions()" placeholder="Поиск по названию или ID..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-sky-500 placeholder-slate-600" />
+        <button onclick="loadSessions()" class="text-slate-400 hover:text-slate-200 transition text-sm">↻</button>
+      </div>
     </div>
 
-    <div class="flex gap-2">
-      <button onclick="triggerPull()" class="flex-1 bg-sky-600 hover:bg-sky-500 text-white py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center gap-1.5">
-        <span>⬇️</span> Pull Cloud
-      </button>
-      <button onclick="triggerSyncAll()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5 px-3 rounded-lg text-xs font-medium border border-slate-700 transition flex items-center justify-center gap-1.5">
-        <span>🔄</span> Full Sync
-      </button>
-    </div>
-  </section>
-
-  <!-- Path Mapping Settings -->
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col gap-2">
-    <div class="flex items-center justify-between">
-      <span class="text-xs font-medium text-slate-300">🖥️ Path Translation (OS Remap)</span>
-      <span class="text-[10px] text-slate-500 uppercase tracking-wider font-mono">Auto Git Remote</span>
-    </div>
-    <div class="text-[11px] text-slate-400 bg-slate-950 p-2 rounded border border-slate-800/80 font-mono">
-      <div class="text-slate-500">Local Workspaces:</div>
-      <div class="text-emerald-400 truncate">C:\Users\Кирилл\Desktop\synchronum</div>
-    </div>
-  </section>
-
-  <!-- Conversations List -->
-  <section class="flex-1 flex flex-col gap-2 min-h-0">
-    <div class="flex items-center justify-between text-xs text-slate-400 px-1">
-      <span>Local Sessions (<span id="session-count">--</span>)</span>
-      <button onclick="loadSessions()" class="hover:text-sky-400 transition text-[11px]">↻ Refresh</button>
-    </div>
-
-    <div id="sessions-list" class="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-      <div class="text-xs text-slate-500 text-center py-6">Loading conversations...</div>
+    <!-- Sessions List Container -->
+    <div id="sessions-list" class="flex-1 overflow-y-auto flex flex-col gap-2 pr-1 max-h-[380px]">
+      <div class="text-slate-500 text-center py-10">Загрузка сессий...</div>
     </div>
   </section>
 
   <script>
+    let allSessions = [];
+    let masterPassword = '';
+
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.className = `fixed top-4 right-4 z-50 transform transition-all duration-300 opacity-100 translate-y-0 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 border text-xs font-medium ${
+        type === 'success' 
+          ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-300' 
+          : 'bg-rose-950/90 border-rose-500/40 text-rose-300'
+      }`;
+      setTimeout(() => {
+        toast.className = 'fixed top-4 right-4 z-50 transform transition-all duration-300 opacity-0 pointer-events-none translate-y-[-10px]';
+      }, 3500);
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.googleDriveConnected) {
+          const badge = document.getElementById('gdrive-badge');
+          badge.innerText = 'Подключен 🟢';
+          badge.className = 'text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30';
+          document.getElementById('btn-gdrive-connect').innerText = '✓ Google Диск активен';
+        }
+      } catch (err) {}
+    }
+
     async function loadSessions() {
       try {
-        const res = await fetch('/api/conversations');
-        const data = await res.json();
-        const container = document.getElementById('sessions-list');
-        document.getElementById('session-count').innerText = data.length;
-
-        if (data.length === 0) {
-          container.innerHTML = '<div class="text-xs text-slate-500 text-center py-6">No conversations found.</div>';
-          return;
-        }
-
-        container.innerHTML = data.map(s => `
-          <div class="bg-slate-900/90 hover:bg-slate-800/80 border border-slate-800/80 rounded-lg p-2.5 flex flex-col gap-1.5 transition">
-            <div class="flex items-start justify-between gap-2">
-              <span class="text-xs font-medium text-slate-200 line-clamp-1">${s.title || '(Untitled conversation)'}</span>
-              <span class="text-[10px] text-sky-400 font-mono bg-sky-500/10 px-1.5 py-0.5 rounded">${s.step_count} steps</span>
-            </div>
-            <div class="flex items-center justify-between text-[10px] text-slate-500">
-              <span class="truncate max-w-[150px] font-mono">${s.conversation_id}</span>
-              <div class="flex gap-1.5">
-                <button onclick="exportConvo('${s.conversation_id}')" class="hover:text-slate-200 transition">📦 Export</button>
-                <button onclick="pushConvo('${s.conversation_id}')" class="text-sky-400 hover:text-sky-300 font-medium transition">☁️ Push</button>
-              </div>
-            </div>
-          </div>
-        `).join('');
+        const res = await fetch('/api/conversations?limit=100');
+        allSessions = await res.json();
+        renderSessions(allSessions);
+        document.getElementById('session-count').innerText = allSessions.length;
       } catch (err) {
-        document.getElementById('sessions-list').innerHTML = '<div class="text-xs text-rose-400 text-center py-6">Failed to load sessions.</div>';
+        document.getElementById('sessions-list').innerHTML = '<div class="text-rose-400 text-center py-10">Ошибка загрузки сессий</div>';
       }
     }
 
-    function toggleLock() {
-      const pwd = document.getElementById('master-password').value;
-      if (!pwd) {
-        alert('Please enter a password');
+    function renderSessions(sessions) {
+      const container = document.getElementById('sessions-list');
+      if (!sessions || sessions.length === 0) {
+        container.innerHTML = '<div class="text-slate-500 text-center py-10">Диалоги не найдены</div>';
         return;
       }
-      alert('Master password saved in session memory for E2EE encryption!');
+
+      container.innerHTML = sessions.map(s => {
+        const date = s.last_modified_time ? new Date(s.last_modified_time).toLocaleString('ru-RU') : 'недавно';
+        return `
+          <div class="bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-3 transition">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="font-semibold text-slate-100 text-xs truncate">${s.title || '(Без названия)'}</span>
+                <span class="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-1.5 py-0.2 rounded text-[10px] font-mono shrink-0">${s.step_count} шагов</span>
+              </div>
+              <div class="flex items-center gap-3 text-[11px] text-slate-500">
+                <span class="font-mono text-[10px] truncate max-w-[140px] text-slate-600">${s.conversation_id}</span>
+                <span>•</span>
+                <span>${date}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button onclick="exportSession('${s.conversation_id}')" title="Скачать бандл сессии" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-2.5 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1 text-[11px]">
+                <span>📦</span> Скачать
+              </button>
+              <button onclick="pushSession('${s.conversation_id}')" title="Выгрузить в Google Диск" class="bg-sky-600/90 hover:bg-sky-500 text-white font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 text-[11px] shadow-sm">
+                <span>☁️</span> Push
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
-    function triggerPull() {
-      alert('Pulling latest sessions from Google Drive...');
+    function filterSessions() {
+      const q = document.getElementById('search-input').value.toLowerCase();
+      const filtered = allSessions.filter(s => 
+        (s.title && s.title.toLowerCase().includes(q)) || 
+        (s.conversation_id && s.conversation_id.toLowerCase().includes(q))
+      );
+      renderSessions(filtered);
     }
 
-    function triggerSyncAll() {
-      alert('Running full bi-directional synchronization...');
+    function saveMasterKey() {
+      const val = document.getElementById('master-password').value;
+      if (!val) {
+        showToast('Пожалуйста, введите пароль', 'error');
+        return;
+      }
+      masterPassword = val;
+      const ind = document.getElementById('lock-indicator');
+      ind.innerText = 'Активен 🔒';
+      ind.className = 'text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30';
+      showToast('Мастер-ключ сохранен для шифрования E2EE!');
     }
 
-    function exportConvo(id) {
-      window.open('/api/export/' + id);
+    function exportSession(id) {
+      const url = '/api/export/' + id + (masterPassword ? '?password=' + encodeURIComponent(masterPassword) : '');
+      window.location.href = url;
+      showToast('Бандл формируется и скачивается...');
     }
 
-    function pushConvo(id) {
-      alert('Uploading session ' + id + ' to Google Drive appDataFolder...');
+    async function pushSession(id) {
+      if (!masterPassword) {
+        showToast('Сначала задайте мастер-пароль для E2EE!', 'error');
+        return;
+      }
+      showToast('Шифрование и загрузка в Google Диск...');
+      try {
+        const res = await fetch('/api/push/' + id, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: masterPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Сессия успешно выгружена (${(data.result.bytes/1024).toFixed(1)} КБ)!`);
+        } else {
+          showToast('Ошибка выгрузки: ' + (data.error || 'Проверьте авторизацию'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при выгрузке', 'error');
+      }
     }
 
+    async function pullCloud() {
+      if (!masterPassword) {
+        showToast('Введите мастер-пароль для расшифровки!', 'error');
+        return;
+      }
+      showToast('Проверка обновлений в Google Диске...');
+      try {
+        const res = await fetch('/api/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: masterPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Синхронизировано: ${data.result.restored.length} сессий обновлено!`);
+          loadSessions();
+        } else {
+          showToast('Ошибка синхронизации: ' + (data.error || 'Не удалось получить данные'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при синхронизации', 'error');
+      }
+    }
+
+    async function connectGoogleDrive() {
+      try {
+        showToast('Открываем окно авторизации Google OAuth...');
+        await fetch('/api/connect-gdrive', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+      } catch (err) {
+        showToast('Ошибка запуска OAuth', 'error');
+      }
+    }
+
+    async function handleFileImport(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      showToast(`Импорт бандла: ${file.name}...`);
+      const buffer = await file.arrayBuffer();
+
+      try {
+        const url = '/api/import' + (masterPassword ? '?password=' + encodeURIComponent(masterPassword) : '');
+        const res = await fetch(url, {
+          method: 'POST',
+          body: buffer
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Сессия успешно импортирована (${data.result.filesRestored} файлов)!`);
+          loadSessions();
+        } else {
+          showToast('Ошибка импорта: ' + (data.error || 'Неверный формат или пароль'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при импорте', 'error');
+      }
+      e.target.value = '';
+    }
+
+    async function installSidecar() {
+      try {
+        const btn = document.getElementById('btn-install-sidecar');
+        btn.innerText = 'Привязка...';
+        const res = await fetch('/api/install-sidecar', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          btn.innerText = '✓ Привязано';
+          btn.className = 'bg-emerald-600 text-white font-medium px-3 py-1.5 rounded-lg text-xs';
+          showToast('Sidecar успешно привязан к Antigravity! Перезапустите приложение.');
+        } else {
+          showToast('Ошибка установки: ' + data.error, 'error');
+          btn.innerText = 'Повторить';
+        }
+      } catch (err) {
+        showToast('Ошибка установки', 'error');
+      }
+    }
+
+    checkStatus();
     loadSessions();
   </script>
 </body>
