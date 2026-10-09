@@ -1,0 +1,12 @@
+{
+  "synchronum-session-sync": {
+    "enabled": true,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node --experimental-sqlite ./dist/cli.js status",
+        "timeout": 30
+      }
+    ]
+  }
+}
