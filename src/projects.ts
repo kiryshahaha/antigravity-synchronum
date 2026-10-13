@@ -122,13 +122,6 @@ export function ensureProjectConfigExists(
     fs.writeFileSync(projectFilePath, JSON.stringify(config, null, 2), 'utf8');
   }
 
-  // Ensure workspace directory exists locally so Antigravity doesn't fail
-  try {
-    const wsPath = PathResolver.uriToPath(workspaceUri);
-    if (wsPath && !fs.existsSync(wsPath)) {
-      fs.mkdirSync(wsPath, { recursive: true });
-    }
-  } catch {}
 
   // Update projectsOrder in app_storage.json
   try {
