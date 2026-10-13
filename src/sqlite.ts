@@ -37,6 +37,21 @@ export class AntigravitySqlite {
     }
   }
 
+  public listSummariesWithRawBlob(): { conversation_id: string; raw_summary: Buffer }[] {
+    const db = new DatabaseSync(this.summariesDbPath, { readOnly: true });
+    try {
+      const stmt = db.prepare(`
+        SELECT conversation_id, raw_summary 
+        FROM conversation_summaries
+        WHERE raw_summary IS NOT NULL AND length(raw_summary) > 0
+        ORDER BY last_modified_time DESC
+      `);
+      return stmt.all() as unknown as { conversation_id: string; raw_summary: Buffer }[];
+    } finally {
+      db.close();
+    }
+  }
+
   public getSummary(conversationId: string): ConversationSummary | null {
     const db = new DatabaseSync(this.summariesDbPath, { readOnly: true });
     try {
@@ -108,6 +123,7 @@ export class AntigravitySqlite {
         raw_summary: (() => {
           if (!summary.raw_summary) return null;
           if (Buffer.isBuffer(summary.raw_summary)) return summary.raw_summary;
+          if (summary.raw_summary instanceof Uint8Array) return Buffer.from(summary.raw_summary);
           if (typeof summary.raw_summary === 'object') {
             if ('data' in summary.raw_summary && Array.isArray((summary.raw_summary as any).data)) {
               return Buffer.from((summary.raw_summary as any).data);
@@ -115,6 +131,15 @@ export class AntigravitySqlite {
             if (Array.isArray(summary.raw_summary)) {
               return Buffer.from(summary.raw_summary);
             }
+            const vals = Object.values(summary.raw_summary);
+            if (vals.length > 0 && typeof vals[0] === 'number') {
+              return Buffer.from(vals as number[]);
+            }
+          }
+          if (typeof summary.raw_summary === 'string') {
+            try {
+              return Buffer.from(summary.raw_summary, 'base64');
+            } catch {}
           }
           return null;
         })(),

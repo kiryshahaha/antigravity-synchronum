@@ -10,6 +10,7 @@ import { AntigravitySqlite } from './sqlite.js';
 import { GoogleDriveStorageProvider, SyncStorageProvider } from './storage.js';
 import { DeviceInfo } from './types.js';
 import { getConversationStorageSubpath } from './projects.js';
+import { syncAgyhubProtoFromDb } from './proto-sync.js';
 
 export interface RemoteSessionEntry {
   conversation_id: string;
@@ -342,6 +343,13 @@ export class SynchronumSyncEngine {
     }
 
     const devices = await this.listAllDevices(password);
+
+    // Keep agyhub_summaries_proto.pb fully synced with all restored sessions
+    try {
+      syncAgyhubProtoFromDb(this.paths.summariesDbPath, this.paths.agyhubProtoPath);
+    } catch (e: any) {
+      console.warn('[Proto Sync Warning]', e.message);
+    }
 
     return {
       pushed,

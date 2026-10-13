@@ -7,6 +7,7 @@ export interface AntigravityPaths {
   conversationsDir: string;
   brainDir: string;
   summariesDbPath: string;
+  agyhubProtoPath: string;
 }
 
 export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
@@ -20,12 +21,14 @@ export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
   const summariesDbPath = path.join(root, 'conversation_summaries.db');
   const conversationsDir = path.join(root, 'conversations');
   const brainDir = path.join(root, 'brain');
+  const agyhubProtoPath = path.join(root, 'agyhub_summaries_proto.pb');
 
   return {
     root,
     conversationsDir,
     brainDir,
     summariesDbPath,
+    agyhubProtoPath,
   };
 }
 

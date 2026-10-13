@@ -5,6 +5,7 @@ import path from 'node:path';
 import { encryptBuffer, decryptBuffer, isEncryptedBuffer } from './crypto.js';
 import { PathResolver } from './path-resolver.js';
 import { getAntigravityPaths } from './paths.js';
+import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { BundleManifest, ConversationSummary, ExportOptions, ImportOptions } from './types.js';
 
@@ -194,6 +195,11 @@ export class SynchronumBundler {
 
     // Step 4: Upsert into conversation_summaries.db
     this.sqlite.upsertSummary(summaryToUpsert);
+
+    // Step 5: Automatically sync agyhub_summaries_proto.pb so Antigravity loads the session natively
+    try {
+      syncAgyhubProtoFromDb(this.paths.summariesDbPath, this.paths.agyhubProtoPath);
+    } catch {}
 
     return {
       manifest,
