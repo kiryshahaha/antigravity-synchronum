@@ -1,14 +1,18 @@
 {
-  "$schema": "https://antigravity.google/schemas/sidecar.json",
-  "name": "synchronum",
-  "displayName": "Synchronum Cloud Sync",
-  "version": "1.0.0",
+  "command": "node",
+  "args": ["--experimental-sqlite", "./dist/sidecar-server.js"],
+  "restart_policy": "always",
+  "display_name": "Synchronum",
   "description": "Cross-device E2EE synchronization for Google Antigravity 2.0 sessions",
-  "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
-  "title": "Synchronum",
-  "icon": "sync",
-  "command": "node --experimental-sqlite ./dist/sidecar-server.js",
-  "environment": {
-    "NODE_ENV": "production"
+  "has_web_ui": true,
+  "ui_config": {
+    "display_name": "Synchronum",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "Synchronum Cloud Sync"
+      }
+    ]
   }
 }

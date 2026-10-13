@@ -8,7 +8,7 @@
     "synchronum": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "start": "node --experimental-sqlite ./dist/cli.js",
     "dev": "tsx --experimental-sqlite ./src/cli.ts",
     "test": "echo \"Tests passed\""

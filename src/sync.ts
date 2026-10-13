@@ -3,9 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
 import { decryptBuffer, encryptBuffer, isEncryptedBuffer } from './crypto.js';
-import { GoogleDriveAppDataClient, GoogleDriveOAuth } from './gdrive.js';
+import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
 import { AntigravitySqlite } from './sqlite.js';
+import { GoogleDriveStorageProvider, SyncStorageProvider } from './storage.js';
 
 export interface RemoteSessionEntry {
   conversation_id: string;
@@ -29,19 +30,27 @@ export interface RemoteIndex {
 const INDEX_FILE_NAME = 'synchronum_index.json.enc';
 
 export class SynchronumSyncEngine {
-  private drive: GoogleDriveAppDataClient;
+  private storage: SyncStorageProvider;
   private bundler: SynchronumBundler;
   private sqlite: AntigravitySqlite;
   private paths = getAntigravityPaths();
 
-  constructor(oauth: GoogleDriveOAuth) {
-    this.drive = new GoogleDriveAppDataClient(oauth);
+  constructor(providerOrOAuth: SyncStorageProvider | GoogleDriveOAuth) {
+    if ('listFiles' in providerOrOAuth && typeof (providerOrOAuth as any).listFiles === 'function') {
+      this.storage = providerOrOAuth as SyncStorageProvider;
+    } else {
+      this.storage = new GoogleDriveStorageProvider(providerOrOAuth as GoogleDriveOAuth);
+    }
     this.bundler = new SynchronumBundler();
     this.sqlite = new AntigravitySqlite(this.paths.summariesDbPath);
   }
 
+  public getStorageProvider(): SyncStorageProvider {
+    return this.storage;
+  }
+
   public async fetchRemoteIndex(password: string): Promise<RemoteIndex> {
-    const files = await this.drive.listFiles();
+    const files = await this.storage.listFiles();
     const indexFile = files.find((f) => f.name === INDEX_FILE_NAME);
 
     if (!indexFile) {
@@ -53,13 +62,21 @@ export class SynchronumSyncEngine {
       };
     }
 
-    const encryptedData = await this.drive.downloadFile(indexFile.id);
+    const encryptedData = await this.storage.downloadFile(indexFile.id);
     let decrypted = encryptedData;
     if (isEncryptedBuffer(encryptedData)) {
-      decrypted = decryptBuffer(encryptedData, password);
+      try {
+        decrypted = decryptBuffer(encryptedData, password);
+      } catch {
+        throw new Error('Неверный мастер-пароль! Введенный пароль не совпадает с паролем облака.');
+      }
     }
 
-    return JSON.parse(decrypted.toString('utf-8'));
+    try {
+      return JSON.parse(decrypted.toString('utf-8'));
+    } catch {
+      throw new Error('Неверный мастер-пароль или поврежденный файл индекса.');
+    }
   }
 
   public async saveRemoteIndex(index: RemoteIndex, password: string): Promise<string> {
@@ -69,7 +86,7 @@ export class SynchronumSyncEngine {
     const jsonBuffer = Buffer.from(JSON.stringify(index, null, 2), 'utf-8');
     const encrypted = encryptBuffer(jsonBuffer, password);
 
-    return this.drive.uploadFile(INDEX_FILE_NAME, encrypted, 'application/octet-stream');
+    return this.storage.uploadFile(INDEX_FILE_NAME, encrypted, 'application/octet-stream');
   }
 
   public async pushSession(
@@ -89,7 +106,7 @@ export class SynchronumSyncEngine {
       const bundleBuffer = fs.readFileSync(bundlePath);
       const remoteFileName = `session_${conversationId}.bundle.enc`;
 
-      const fileId = await this.drive.uploadFile(remoteFileName, bundleBuffer);
+      const fileId = await this.storage.uploadFile(remoteFileName, bundleBuffer);
 
       // Update remote index
       const index = await this.fetchRemoteIndex(password);
@@ -144,7 +161,7 @@ export class SynchronumSyncEngine {
       // Download and import
       const tempFile = path.join(tempDir, `${id}.download.enc`);
       try {
-        const data = await this.drive.downloadFile(entry.file_id);
+        const data = await this.storage.downloadFile(entry.file_id);
         fs.writeFileSync(tempFile, data);
 
         await this.bundler.importBundle(tempFile, { password });

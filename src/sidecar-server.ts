@@ -1,22 +1,88 @@
+import dns from 'node:dns';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch {}
+
 import { SynchronumBundler } from './bundler.js';
+import { loadConfig, saveConfig, SynchronumConfig } from './config.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
+import { installService, isServiceInstalled, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
+import { createStorageProvider, SyncStorageProvider } from './storage.js';
 import { SynchronumSyncEngine } from './sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const REPO_ROOT = path.resolve(__dirname, '..');
 
 const PORT = parseInt(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT || '42125', 10);
 const paths = getAntigravityPaths();
 const sqlite = new AntigravitySqlite(paths.summariesDbPath);
 const bundler = new SynchronumBundler();
 const oauth = new GoogleDriveOAuth();
+
+let currentConfig: SynchronumConfig = loadConfig();
+let currentStorage: SyncStorageProvider = createStorageProvider(currentConfig, oauth);
+
+function getSyncEngine(): SynchronumSyncEngine {
+  currentConfig = loadConfig();
+  currentStorage = createStorageProvider(currentConfig, oauth);
+  return new SynchronumSyncEngine(currentStorage);
+}
+
+// Background Auto-Sync Worker
+let isSyncing = false;
+async function runAutoSyncCycle(): Promise<void> {
+  if (isSyncing) return;
+  const config = loadConfig();
+  if (!config.autoSync || !config.masterPassword) return;
+
+  const intervalMs = Math.max(1, config.autoSyncIntervalMinutes || 5) * 60 * 1000;
+  const lastSync = config.lastSyncTime ? new Date(config.lastSyncTime).getTime() : 0;
+  if (Date.now() - lastSync < intervalMs) return;
+
+  isSyncing = true;
+  try {
+    const engine = getSyncEngine();
+    console.log(`[Auto-Sync] Running periodic synchronization via ${currentStorage.name}...`);
+
+    // 1. Pull remote updates first
+    await engine.pullAll(config.masterPassword);
+
+    // 2. Find sessions modified since last sync (or last 24h) and push
+    const summaries = sqlite.listSummaries(100);
+    const syncCutoff = lastSync || Date.now() - 24 * 3600 * 1000;
+
+    for (const s of summaries) {
+      const modTime = s.last_modified_time ? new Date(s.last_modified_time).getTime() : 0;
+      if (modTime > syncCutoff) {
+        try {
+          await engine.pushSession(s.conversation_id, config.masterPassword);
+          console.log(`[Auto-Sync] Pushed updated session: ${s.title || s.conversation_id}`);
+        } catch (e: any) {
+          console.error(`[Auto-Sync] Failed to push session ${s.conversation_id}:`, e.message);
+        }
+      }
+    }
+
+    saveConfig({ lastSyncTime: new Date().toISOString() });
+    console.log('[Auto-Sync] Cycle completed successfully.');
+  } catch (err: any) {
+    console.error('[Auto-Sync Error]', err.message);
+  } finally {
+    isSyncing = false;
+  }
+}
+
+// Run auto-sync check every 30 seconds
+setInterval(runAutoSyncCycle, 30000);
 
 // Helper to parse multipart/form-data or json
 function parseBody(req: http.IncomingMessage): Promise<any> {
@@ -39,6 +105,26 @@ function parseBody(req: http.IncomingMessage): Promise<any> {
   });
 }
 
+function resolveStaticFile(requestPath: string): string | null {
+  const normalized = requestPath === '/' ? 'index.html' : requestPath.replace(/^\/+/, '');
+  const searchDirs = [
+    path.resolve(__dirname, '..', 'sidecar', 'public'),
+    path.resolve(__dirname, 'public'),
+    path.resolve(REPO_ROOT, 'sidecar', 'public'),
+    path.resolve(process.cwd(), 'sidecar', 'public'),
+    path.resolve(process.cwd(), 'public'),
+  ];
+
+  for (const d of searchDirs) {
+    const candidate = path.join(d, normalized);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://127.0.0.1:${PORT}`);
 
@@ -55,6 +141,10 @@ const server = http.createServer(async (req, res) => {
 
   // 1. Status API
   if (url.pathname === '/api/status') {
+    const config = loadConfig();
+    const storage = createStorageProvider(config, oauth);
+    const isAvail = await storage.isAvailable();
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
       JSON.stringify({
@@ -64,12 +154,88 @@ const server = http.createServer(async (req, res) => {
         antigravityDir: paths.root,
         totalConversations: sqlite.listSummaries(1000).length,
         googleDriveConnected: oauth.isAuthenticated(),
+        storageType: config.storageType,
+        storageName: storage.getDisplayName(),
+        storageAvailable: isAvail,
+        autoSync: config.autoSync,
+        autoSyncIntervalMinutes: config.autoSyncIntervalMinutes,
+        lastSyncTime: config.lastSyncTime || null,
+        serviceInstalled: isServiceInstalled(),
       })
     );
     return;
   }
 
-  // 2. Conversations List API
+  // 2. Config API
+  if (url.pathname === '/api/config') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(loadConfig()));
+      return;
+    }
+
+    if (req.method === 'POST') {
+      const body = await parseBody(req);
+      const updated = saveConfig(body);
+      currentConfig = updated;
+      currentStorage = createStorageProvider(updated, oauth);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, config: updated }));
+      return;
+    }
+  }
+
+  // 3. Service Management API
+  if (url.pathname === '/api/service/install' && req.method === 'POST') {
+    try {
+      const result = await installService(REPO_ROOT);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, result }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/service/uninstall' && req.method === 'POST') {
+    try {
+      await uninstallService();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 4. Instant Sync API
+  if (url.pathname === '/api/sync-now' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const password = body.password || loadConfig().masterPassword;
+
+    if (!password) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Мастер-пароль обязателен для синхронизации!' }));
+      return;
+    }
+
+    try {
+      const engine = getSyncEngine();
+      const pullResult = await engine.pullAll(password);
+      saveConfig({ lastSyncTime: new Date().toISOString() });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, result: pullResult }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 5. Conversations List API
   if (url.pathname === '/api/conversations') {
     try {
       const limit = parseInt(url.searchParams.get('limit') || '50', 10);
@@ -83,14 +249,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 3. Export File Download API
+  // 6. Export File Download API
   if (url.pathname.startsWith('/api/export/')) {
     const conversationId = url.pathname.replace('/api/export/', '');
     const password = url.searchParams.get('password') || undefined;
 
     try {
       const tempPath = path.join(os.tmpdir(), `${conversationId}${password ? '.bundle.enc' : '.bundle'}`);
-      const exportResult = await bundler.exportBundle(conversationId, {
+      await bundler.exportBundle(conversationId, {
         outputPath: tempPath,
         password,
       });
@@ -113,7 +279,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 4. Import Bundle Upload API
+  // 7. Import Bundle Upload API
   if (url.pathname === '/api/import' && req.method === 'POST') {
     try {
       const buffer = await parseBody(req);
@@ -141,21 +307,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 5. Connect Google Drive API
+  // 8. Connect Google Drive API
   if (url.pathname === '/api/connect-gdrive' && req.method === 'POST') {
     const body = await parseBody(req);
-    oauth.setCredentials(body.clientId || '', body.clientSecret || '');
-    oauth.startAuthFlow({ clientId: body.clientId, clientSecret: body.clientSecret }).catch(() => {});
+    if (body.clientId && body.clientSecret) {
+      oauth.setCredentials(body.clientId, body.clientSecret);
+    }
+    const authDetails = oauth.generateAuthUrl(body.clientId ? { clientId: body.clientId } : {});
+    oauth.startAuthFlow({ ...(body.clientId ? { clientId: body.clientId, clientSecret: body.clientSecret } : {}), authDetails }).catch((err) => {
+      console.error('[OAuth Flow Error]', err.message);
+    });
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ started: true }));
+    res.end(JSON.stringify({ started: true, authUrl: authDetails.authUrl }));
     return;
   }
 
-  // 6. Push to Google Drive API
+  // 9. Push to Cloud/Local Provider API
   if (url.pathname.startsWith('/api/push/') && req.method === 'POST') {
     const conversationId = url.pathname.replace('/api/push/', '');
     const body = await parseBody(req);
-    const password = body.password;
+    const password = body.password || loadConfig().masterPassword;
 
     if (!password) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -164,7 +335,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const syncEngine = new SynchronumSyncEngine(oauth);
+      const syncEngine = getSyncEngine();
       const result = await syncEngine.pushSession(conversationId, password);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, result }));
@@ -175,10 +346,10 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 7. Pull from Google Drive API
+  // 10. Pull from Cloud/Local Provider API
   if (url.pathname === '/api/pull' && req.method === 'POST') {
     const body = await parseBody(req);
-    const password = body.password;
+    const password = body.password || loadConfig().masterPassword;
 
     if (!password) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -187,7 +358,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      const syncEngine = new SynchronumSyncEngine(oauth);
+      const syncEngine = getSyncEngine();
       const result = await syncEngine.pullAll(password);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, result }));
@@ -198,14 +369,20 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 8. Auto-install Sidecar into Antigravity
+  // 11. Auto-install Sidecar into Antigravity
   if (url.pathname === '/api/install-sidecar' && req.method === 'POST') {
     try {
       const targetSidecarDir = path.join(paths.root, 'sidecars', 'synchronum');
-      const sourceSidecarDir = path.resolve(__dirname, '..', 'sidecar');
+      const sourceSidecarDir = path.resolve(REPO_ROOT, 'sidecar');
 
       fs.mkdirSync(targetSidecarDir, { recursive: true });
       fs.cpSync(sourceSidecarDir, targetSidecarDir, { recursive: true });
+
+      // Also copy dist for self-contained relative execution
+      const distDir = path.resolve(REPO_ROOT, 'dist');
+      if (fs.existsSync(distDir)) {
+        fs.cpSync(distDir, path.join(targetSidecarDir, 'dist'), { recursive: true });
+      }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, path: targetSidecarDir }));
@@ -216,17 +393,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Static files
-  const publicDir = path.resolve(__dirname, '..', 'sidecar', 'public');
-  let filePath = path.join(publicDir, url.pathname === '/' ? 'index.html' : url.pathname);
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    const ext = path.extname(filePath);
+  // Static files serving with flexible fallback
+  const resolvedPath = resolveStaticFile(url.pathname);
+  if (resolvedPath) {
+    const ext = path.extname(resolvedPath);
     const contentType =
-      ext === '.html' ? 'text/html; charset=utf-8' : ext === '.css' ? 'text/css' : ext === '.js' ? 'application/javascript' : 'text/plain';
+      ext === '.html'
+        ? 'text/html; charset=utf-8'
+        : ext === '.css'
+          ? 'text/css'
+          : ext === '.js'
+            ? 'application/javascript'
+            : ext === '.json'
+              ? 'application/json'
+              : 'text/plain';
 
     res.writeHead(200, { 'Content-Type': contentType });
-    res.end(fs.readFileSync(filePath));
+    res.end(fs.readFileSync(resolvedPath));
     return;
   }
 

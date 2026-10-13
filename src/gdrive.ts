@@ -1,8 +1,13 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1', '8.8.4.4']);
+} catch {}
 
 export interface OAuthTokens {
   access_token: string;
@@ -29,7 +34,7 @@ export class GoogleDriveOAuth {
   private tokens: OAuthTokens | null = null;
 
   constructor(clientId?: string, clientSecret?: string) {
-    // Allows user-provided GCP credentials or falls back to environment/config
+    // Allows user-provided GCP credentials or falls back to environment or local tokens
     this.clientId = clientId || process.env.SYNCHRONUM_CLIENT_ID || '';
     this.clientSecret = clientSecret || process.env.SYNCHRONUM_CLIENT_SECRET || '';
     this.loadTokens();
@@ -44,6 +49,14 @@ export class GoogleDriveOAuth {
     if (fs.existsSync(TOKEN_FILE_PATH)) {
       try {
         this.tokens = JSON.parse(fs.readFileSync(TOKEN_FILE_PATH, 'utf-8'));
+        if (this.tokens) {
+          if ((this.tokens as any).clientId && !this.clientId) {
+            this.clientId = (this.tokens as any).clientId;
+          }
+          if ((this.tokens as any).clientSecret && !this.clientSecret) {
+            this.clientSecret = (this.tokens as any).clientSecret;
+          }
+        }
       } catch {
         this.tokens = null;
       }
@@ -105,15 +118,11 @@ export class GoogleDriveOAuth {
     return data.access_token;
   }
 
-  public async startAuthFlow(options: { clientId?: string; clientSecret?: string } = {}): Promise<OAuthTokens> {
+  public generateAuthUrl(options: { clientId?: string } = {}): { authUrl: string; verifier: string } {
     const clientId = options.clientId || this.clientId;
-    const clientSecret = options.clientSecret || this.clientSecret;
-
     if (!clientId) {
-      throw new Error('Google OAuth Client ID is required. Pass via options or set SYNCHRONUM_CLIENT_ID.');
+      throw new Error('Google OAuth Client ID is required.');
     }
-
-    // PKCE code verifier and challenge
     const verifier = crypto.randomBytes(32).toString('base64url');
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
 
@@ -126,6 +135,19 @@ export class GoogleDriveOAuth {
     authUrl.searchParams.set('prompt', 'consent');
     authUrl.searchParams.set('code_challenge', challenge);
     authUrl.searchParams.set('code_challenge_method', 'S256');
+
+    return { authUrl: authUrl.toString(), verifier };
+  }
+
+  public async startAuthFlow(options: { clientId?: string; clientSecret?: string; authDetails?: { authUrl: string; verifier: string } } = {}): Promise<OAuthTokens> {
+    const clientId = options.clientId || this.clientId;
+    const clientSecret = options.clientSecret || this.clientSecret;
+
+    if (!clientId) {
+      throw new Error('Google OAuth Client ID is required. Pass via options or set SYNCHRONUM_CLIENT_ID.');
+    }
+
+    const { authUrl, verifier } = options.authDetails || this.generateAuthUrl({ clientId });
 
     return new Promise((resolve, reject) => {
       const server = http.createServer(async (req, res) => {
@@ -200,12 +222,12 @@ export class GoogleDriveOAuth {
 
       server.listen(DEFAULT_REDIRECT_PORT, () => {
         console.log(`\n🔗 Please authorize Synchronum in your browser:`);
-        console.log(`\n${authUrl.toString()}\n`);
+        console.log(`\n${authUrl}\n`);
 
         // Attempt to auto-open in default browser
         import('node:child_process').then(({ exec }) => {
-          const startCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-          exec(`${startCmd} "${authUrl.toString()}"`, () => {});
+          const startCmd = process.platform === 'win32' ? 'start ""' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+          exec(`${startCmd} "${authUrl}"`, () => {});
         });
       });
 
@@ -259,10 +281,10 @@ export class GoogleDriveAppDataClient {
     const existingFiles = await this.listFiles();
     const existing = existingFiles.find((f) => f.name === name);
 
-    const metadata = {
-      name,
-      parents: ['appDataFolder'],
-    };
+    const metadata: Record<string, any> = { name };
+    if (!existing) {
+      metadata.parents = ['appDataFolder'];
+    }
 
     const boundary = '-------SynchronumBoundary' + Date.now();
     const delimiter = `\r\n--${boundary}\r\n`;

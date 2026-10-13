@@ -42,67 +42,91 @@
       <div>
         <div class="flex items-center gap-1.5">
           <h1 class="text-sm font-bold text-slate-100">Synchronum</h1>
-          <span class="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-400 text-[10px] font-mono border border-sky-500/30">v1.0</span>
+          <span class="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-400 text-[10px] font-mono border border-sky-500/30">v2.0 Open-Source</span>
         </div>
-        <p class="text-[11px] text-slate-400">Синхронизация диалогов Antigravity 2.0</p>
+        <p class="text-[11px] text-slate-400">Фоновая E2EE-синхронизация Antigravity 2.0</p>
       </div>
     </div>
     <div id="status-badge" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium">
       <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-      <span id="status-text">Ядро подключено</span>
+      <span id="status-text">Фоновый сервис активен</span>
     </div>
   </header>
 
-  <!-- Quick Setup Banner (One-click Antigravity Install) -->
-  <section class="bg-gradient-to-r from-sky-950/60 via-slate-900 to-slate-900 border border-sky-800/50 rounded-xl p-3 flex items-center justify-between gap-3 shadow-md">
+  <!-- OS Background Service & Autostart Banner -->
+  <section class="bg-gradient-to-r from-slate-900 via-slate-900 to-sky-950/40 border border-slate-800/80 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-md">
     <div class="flex items-center gap-2.5">
-      <span class="text-xl">🧩</span>
+      <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-base">
+        🚀
+      </div>
       <div>
-        <div class="font-semibold text-sky-300 text-xs">Интеграция в Antigravity 2.0 Sidecar</div>
-        <div class="text-[11px] text-slate-400">Добавить вкладку синхронизации в правую панель Antigravity</div>
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-200 text-xs">Фоновый сервис ОС (Автозапуск)</span>
+          <span id="service-badge" class="text-[10px] px-2 py-0.2 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Проверка...</span>
+        </div>
+        <div class="text-[11px] text-slate-400">Работает тихо в фоне без черных окон консоли при каждом старте ПК</div>
       </div>
     </div>
-    <button onclick="installSidecar()" id="btn-install-sidecar" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs whitespace-nowrap shadow-sm">
-      ⚡ Привязать в 1 клик
-    </button>
+    <div class="flex items-center gap-2">
+      <button onclick="toggleService()" id="btn-service" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs whitespace-nowrap shadow-sm">
+        Включить автозапуск
+      </button>
+      <button onclick="syncNow()" id="btn-sync-now" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs flex items-center gap-1 shadow-sm">
+        <span>⚡</span> Синхронизировать
+      </button>
+    </div>
   </section>
 
-  <!-- Security & Storage Settings -->
+  <!-- Storage Provider Selector & E2EE Settings -->
   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-    <!-- E2EE Card -->
-    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
+    
+    <!-- Storage Provider Card -->
+    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2.5">
+      <div class="flex items-center justify-between">
+        <span class="font-medium text-slate-200 flex items-center gap-1.5">
+          <span>📁</span> Папка синхронизации (Локальная / Облако)
+        </span>
+        <span id="storage-status-badge" class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Zero-Config</span>
+      </div>
+
+      <!-- Local Folder UI Section -->
+      <div id="section-local" class="flex flex-col gap-2">
+        <div class="flex gap-2">
+          <input type="text" id="local-folder-path" placeholder="C:\Users\...\AntigravitySync" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 flex-1 focus:outline-none focus:border-sky-500 font-mono placeholder-slate-600" />
+          <button onclick="saveLocalFolderPath()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg transition border border-slate-700 text-xs">
+            Сохранить
+          </button>
+        </div>
+        <div class="text-[10px] text-slate-400">
+          Укажите папку <b>Google Диска (диск G:\)</b>, Яндекс.Диска, OneDrive или локальную папку. Файлы шифруются AES-256 и синхронизируются автоматически.
+        </div>
+      </div>
+    </div>
+
+    <!-- Security & Auto-Sync Card -->
+    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2.5">
       <div class="flex items-center justify-between">
         <span class="font-medium text-slate-200 flex items-center gap-1.5">
           <span>🔒</span> Мастер-пароль (E2EE AES-256)
         </span>
         <span id="lock-indicator" class="text-[10px] text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">Не задан</span>
       </div>
+
       <div class="flex gap-2">
         <input type="password" id="master-password" placeholder="Введите ключ шифрования" class="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 flex-1 focus:outline-none focus:border-sky-500 placeholder-slate-600" />
         <button onclick="saveMasterKey()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg transition border border-slate-700">
           Сохранить
         </button>
       </div>
-      <div class="text-[10px] text-slate-500">Ключ используется для шифрования сессий перед отправкой в облако или файл.</div>
-    </div>
 
-    <!-- Google Drive Card -->
-    <div class="bg-slate-900/90 border border-slate-800/80 rounded-xl p-3 flex flex-col gap-2">
-      <div class="flex items-center justify-between">
-        <span class="font-medium text-slate-200 flex items-center gap-1.5">
-          <span>☁️</span> Google Drive (appDataFolder)
-        </span>
-        <span id="gdrive-badge" class="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">Не подключен</span>
+      <!-- Auto-Sync Toggle Row -->
+      <div class="flex items-center justify-between pt-1 border-t border-slate-800/80">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="checkbox-auto-sync" onchange="toggleAutoSync(event)" class="rounded bg-slate-950 border-slate-800 text-sky-500 focus:ring-0 w-3.5 h-3.5" />
+          <span class="text-[11px] text-slate-300">Фоновая авто-синхронизация (каждые 5 мин)</span>
+        </label>
+        <span id="last-sync-label" class="text-[10px] text-slate-500 font-mono">Никогда</span>
       </div>
-      <div class="flex gap-2">
-        <button onclick="connectGoogleDrive()" id="btn-gdrive-connect" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium py-1.5 px-2.5 rounded-lg border border-slate-700 transition flex items-center justify-center gap-1.5">
-          <span>🔑</span> Авторизовать Google Диск
-        </button>
-        <button onclick="pullCloud()" class="bg-sky-600 hover:bg-sky-500 text-white font-medium py-1.5 px-3 rounded-lg transition flex items-center justify-center gap-1">
-          <span>⬇️</span> Pull
-        </button>
-      </div>
-      <div class="text-[10px] text-slate-500">Используется изолированная квота Pro (до 5 ТБ) без доступа к личным файлам.</div>
     </div>
   </div>
 
@@ -112,7 +136,7 @@
       <span class="text-base">📦</span>
       <div>
         <div class="font-medium text-slate-200">Импортировать сессию из бандла</div>
-        <div class="text-[11px] text-slate-500">Восстановить `.bundle` или `.bundle.enc` с другого устройства</div>
+        <div class="text-[11px] text-slate-500">Восстановить `.bundle` или `.bundle.enc` с другого устройства офлайн</div>
       </div>
     </div>
     <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition">
@@ -142,7 +166,8 @@
 
   <script>
     let allSessions = [];
-    let masterPassword = '';
+    let masterPassword = localStorage.getItem('synchronum_master_password') || '';
+    let currentConfig = { storageType: 'gdrive', autoSync: false, autostartService: false };
 
     function showToast(msg, type = 'success') {
       const toast = document.getElementById('toast');
@@ -161,13 +186,122 @@
       try {
         const res = await fetch('/api/status');
         const data = await res.json();
-        if (data.googleDriveConnected) {
-          const badge = document.getElementById('gdrive-badge');
-          badge.innerText = 'Подключен 🟢';
-          badge.className = 'text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30';
-          document.getElementById('btn-gdrive-connect').innerText = '✓ Google Диск активен';
+        
+        // Update service badge & button
+        const srvBadge = document.getElementById('service-badge');
+        const srvBtn = document.getElementById('btn-service');
+        if (data.serviceInstalled) {
+          srvBadge.innerText = 'В автозагрузке 🟢';
+          srvBadge.className = 'text-[10px] px-2 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+          srvBtn.innerText = 'Удалить из автозапуска';
+          srvBtn.className = 'bg-slate-800 hover:bg-rose-950/50 text-slate-400 hover:text-rose-300 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs whitespace-nowrap';
+        } else {
+          srvBadge.innerText = 'Не установлен ⚪';
+          srvBadge.className = 'text-[10px] px-2 py-0.2 rounded-full bg-slate-800 text-slate-400 border border-slate-700';
+          srvBtn.innerText = 'Включить автозапуск';
+          srvBtn.className = 'bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs whitespace-nowrap shadow-sm';
+        }
+
+        // Update storage info
+        const storageBadge = document.getElementById('storage-status-badge');
+        if (storageBadge) {
+          storageBadge.innerText = data.storageName || (data.storageType === 'local_folder' ? 'Локальная папка' : data.storageType);
+        }
+
+        // Auto-sync status
+        document.getElementById('checkbox-auto-sync').checked = Boolean(data.autoSync);
+        if (data.lastSyncTime) {
+          const d = new Date(data.lastSyncTime);
+          document.getElementById('last-sync-label').innerText = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
       } catch (err) {}
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        currentConfig = await res.json();
+        if (currentConfig.localFolderPath) {
+          document.getElementById('local-folder-path').value = currentConfig.localFolderPath;
+        }
+      } catch (err) {}
+    }
+
+    async function saveLocalFolderPath() {
+      const p = document.getElementById('local-folder-path').value.trim();
+      if (!p) {
+        showToast('Введите путь к папке', 'error');
+        return;
+      }
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storageType: 'local_folder', localFolderPath: p })
+      });
+      showToast('Путь к локальной папке сохранен!');
+      checkStatus();
+    }
+
+    async function toggleService() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        const action = data.serviceInstalled ? 'uninstall' : 'install';
+        
+        showToast(action === 'install' ? 'Установка в автозапуск Windows...' : 'Удаление из автозапуска...');
+        const sRes = await fetch(`/api/service/${action}`, { method: 'POST' });
+        const sData = await sRes.json();
+        if (sData.success) {
+          showToast(action === 'install' ? 'Служба успешно добавлена в автозапуск!' : 'Служба удалена из автозапуска');
+          checkStatus();
+        } else {
+          showToast('Ошибка службы: ' + sData.error, 'error');
+        }
+      } catch (err) {
+        showToast('Сетевая ошибка при изменении службы', 'error');
+      }
+    }
+
+    async function toggleAutoSync(e) {
+      const enabled = e.target.checked;
+      if (enabled && !masterPassword) {
+        showToast('Сначала задайте мастер-пароль для шифрования!', 'error');
+        e.target.checked = false;
+        return;
+      }
+
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoSync: enabled, masterPassword: masterPassword })
+      });
+      showToast(enabled ? 'Авто-синхронизация включена (каждые 5 мин)' : 'Авто-синхронизация отключена');
+      checkStatus();
+    }
+
+    async function syncNow() {
+      if (!masterPassword) {
+        showToast('Задайте мастер-пароль для синхронизации!', 'error');
+        return;
+      }
+      showToast('Синхронизация в процессе...');
+      try {
+        const res = await fetch('/api/sync-now', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: masterPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Синхронизировано: ${data.result.restored.length} сессий обновлено!`);
+          loadSessions();
+          checkStatus();
+        } else {
+          showToast('Ошибка синхронизации: ' + (data.error || 'Проверьте хранилище'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при вызове синхронизации', 'error');
+      }
     }
 
     async function loadSessions() {
@@ -207,7 +341,7 @@
               <button onclick="exportSession('${s.conversation_id}')" title="Скачать бандл сессии" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-2.5 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1 text-[11px]">
                 <span>📦</span> Скачать
               </button>
-              <button onclick="pushSession('${s.conversation_id}')" title="Выгрузить в Google Диск" class="bg-sky-600/90 hover:bg-sky-500 text-white font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 text-[11px] shadow-sm">
+              <button onclick="pushSession('${s.conversation_id}')" title="Выгрузить в хранилище" class="bg-sky-600/90 hover:bg-sky-500 text-white font-medium px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 text-[11px] shadow-sm">
                 <span>☁️</span> Push
               </button>
             </div>
@@ -232,10 +366,18 @@
         return;
       }
       masterPassword = val;
+      localStorage.setItem('synchronum_master_password', val);
       const ind = document.getElementById('lock-indicator');
       ind.innerText = 'Активен 🔒';
       ind.className = 'text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30';
       showToast('Мастер-ключ сохранен для шифрования E2EE!');
+
+      // Also persist to backend for auto-sync if auto-sync is on
+      fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ masterPassword: val })
+      }).catch(() => {});
     }
 
     function exportSession(id) {
@@ -249,7 +391,7 @@
         showToast('Сначала задайте мастер-пароль для E2EE!', 'error');
         return;
       }
-      showToast('Шифрование и загрузка в Google Диск...');
+      showToast('Шифрование и загрузка...');
       try {
         const res = await fetch('/api/push/' + id, {
           method: 'POST',
@@ -259,6 +401,7 @@
         const data = await res.json();
         if (data.success) {
           showToast(`Сессия успешно выгружена (${(data.result.bytes/1024).toFixed(1)} КБ)!`);
+          checkStatus();
         } else {
           showToast('Ошибка выгрузки: ' + (data.error || 'Проверьте авторизацию'), 'error');
         }
@@ -272,7 +415,7 @@
         showToast('Введите мастер-пароль для расшифровки!', 'error');
         return;
       }
-      showToast('Проверка обновлений в Google Диске...');
+      showToast('Проверка обновлений в хранилище...');
       try {
         const res = await fetch('/api/pull', {
           method: 'POST',
@@ -283,6 +426,7 @@
         if (data.success) {
           showToast(`Синхронизировано: ${data.result.restored.length} сессий обновлено!`);
           loadSessions();
+          checkStatus();
         } else {
           showToast('Ошибка синхронизации: ' + (data.error || 'Не удалось получить данные'), 'error');
         }
@@ -294,11 +438,15 @@
     async function connectGoogleDrive() {
       try {
         showToast('Открываем окно авторизации Google OAuth...');
-        await fetch('/api/connect-gdrive', {
+        const res = await fetch('/api/connect-gdrive', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
+        const data = await res.json();
+        if (data.authUrl) {
+          window.open(data.authUrl, '_blank') || (window.location.href = data.authUrl);
+        }
       } catch (err) {
         showToast('Ошибка запуска OAuth', 'error');
       }
@@ -330,26 +478,16 @@
       e.target.value = '';
     }
 
-    async function installSidecar() {
-      try {
-        const btn = document.getElementById('btn-install-sidecar');
-        btn.innerText = 'Привязка...';
-        const res = await fetch('/api/install-sidecar', { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-          btn.innerText = '✓ Привязано';
-          btn.className = 'bg-emerald-600 text-white font-medium px-3 py-1.5 rounded-lg text-xs';
-          showToast('Sidecar успешно привязан к Antigravity! Перезапустите приложение.');
-        } else {
-          showToast('Ошибка установки: ' + data.error, 'error');
-          btn.innerText = 'Повторить';
-        }
-      } catch (err) {
-        showToast('Ошибка установки', 'error');
-      }
+    if (masterPassword) {
+      document.getElementById('master-password').value = masterPassword;
+      const ind = document.getElementById('lock-indicator');
+      ind.innerText = 'Активен 🔒';
+      ind.className = 'text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30';
     }
 
+    loadConfig();
     checkStatus();
+    setInterval(checkStatus, 3000);
     loadSessions();
   </script>
 </body>

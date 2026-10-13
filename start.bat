@@ -28,6 +28,8 @@ echo [*] Registering Sidecar in Antigravity...
 set "SIDECAR_TARGET=%USERPROFILE%\.gemini\antigravity\sidecars\synchronum"
 if not exist "%SIDECAR_TARGET%" mkdir "%SIDECAR_TARGET%"
 xcopy /s /y /q "sidecar\*" "%SIDECAR_TARGET%\" >nul 2>nul
+if not exist "%SIDECAR_TARGET%\dist" mkdir "%SIDECAR_TARGET%\dist"
+xcopy /s /y /q "dist\*" "%SIDECAR_TARGET%\dist\" >nul 2>nul
 echo [✓] Sidecar successfully registered in Antigravity!
 
 echo.
@@ -36,6 +38,7 @@ start http://localhost:42125
 
 echo.
 echo [✓] Synchronum is running at http://localhost:42125
+echo Tip: To run silently in the background without any console window, use start-silent.vbs
 echo Press Ctrl+C in this window to stop the server.
 echo.
 node --experimental-sqlite ./dist/sidecar-server.js

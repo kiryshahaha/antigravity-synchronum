@@ -31,12 +31,19 @@ export class SynchronumBundler {
     }
 
     const conversationDbPath = path.join(this.paths.conversationsDir, `${conversationId}.db`);
-    if (!fs.existsSync(conversationDbPath)) {
-      throw new Error(`Conversation DB file not found: ${conversationDbPath}`);
-    }
+    const conversationPbPath = path.join(this.paths.conversationsDir, `${conversationId}.pb`);
+    let convoFilePath: string | null = null;
+    let convoFileExt: string = '.db';
 
-    // Step 1: Force WAL checkpoint into DB file
-    this.sqlite.walCheckpoint(conversationDbPath);
+    if (fs.existsSync(conversationDbPath)) {
+      convoFilePath = conversationDbPath;
+      convoFileExt = '.db';
+      // Step 1: Force WAL checkpoint into DB file
+      this.sqlite.walCheckpoint(conversationDbPath);
+    } else if (fs.existsSync(conversationPbPath)) {
+      convoFilePath = conversationPbPath;
+      convoFileExt = '.pb';
+    }
 
     // Step 2: Build manifest
     let gitRemote: string | undefined;
@@ -65,7 +72,9 @@ export class SynchronumBundler {
     // Step 3: Create ZIP package in memory
     const zip = new AdmZip();
     zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2), 'utf-8'));
-    zip.addLocalFile(conversationDbPath, '', 'conversation.db');
+    if (convoFilePath) {
+      zip.addLocalFile(convoFilePath, '', `conversation${convoFileExt}`);
+    }
 
     // Add brain files if exists and requested
     const brainConvoDir = path.join(this.paths.brainDir, conversationId);
@@ -128,18 +137,24 @@ export class SynchronumBundler {
       throw new Error('Invalid manifest: missing conversation_id');
     }
 
-    // Step 1: Restore conversation.db
+    // Step 1: Restore conversation file (.db or .pb)
     const convoDbEntry = zip.getEntry('conversation.db');
-    if (!convoDbEntry) {
-      throw new Error('Invalid bundle: missing conversation.db');
+    const convoPbEntry = zip.getEntry('conversation.pb');
+    let filesRestored = 0;
+
+    if (convoDbEntry) {
+      const targetDbPath = path.join(this.paths.conversationsDir, `${conversationId}.db`);
+      fs.mkdirSync(this.paths.conversationsDir, { recursive: true });
+      fs.writeFileSync(targetDbPath, convoDbEntry.getData());
+      filesRestored++;
+    } else if (convoPbEntry) {
+      const targetPbPath = path.join(this.paths.conversationsDir, `${conversationId}.pb`);
+      fs.mkdirSync(this.paths.conversationsDir, { recursive: true });
+      fs.writeFileSync(targetPbPath, convoPbEntry.getData());
+      filesRestored++;
     }
 
-    const targetDbPath = path.join(this.paths.conversationsDir, `${conversationId}.db`);
-    fs.mkdirSync(this.paths.conversationsDir, { recursive: true });
-    fs.writeFileSync(targetDbPath, convoDbEntry.getData());
-
     // Step 2: Restore brain directory
-    let filesRestored = 1;
     const targetBrainDir = path.join(this.paths.brainDir, conversationId);
     fs.mkdirSync(targetBrainDir, { recursive: true });
 

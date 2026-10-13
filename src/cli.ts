@@ -1,12 +1,14 @@
-#!/usr/bin/env node
 import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
+import { loadConfig, saveConfig } from './config.js';
 import { isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths, validateAntigravityPaths } from './paths.js';
+import { installService, isServiceInstalled, isServiceRunning, startService, stopService, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
+import { createStorageProvider, LocalFolderStorageProvider } from './storage.js';
 import { SynchronumSyncEngine } from './sync.js';
 
 const program = new Command();
@@ -249,6 +251,106 @@ program
       console.error(`\n❌ Cloud list failed: ${err.message}\n`);
       process.exit(1);
     }
+  });
+
+const serviceCmd = program.command('service').description('Manage background OS service & autostart');
+
+serviceCmd
+  .command('status')
+  .description('Check background service status')
+  .action(async () => {
+    const runningStatus = await isServiceRunning();
+    const installed = isServiceInstalled();
+    console.log('\n=== Synchronum Background Service ===');
+    console.log(`Installed in OS Autostart: ${installed ? '🟢 YES' : '⚪ NO'}`);
+    console.log(`Running on background port: ${runningStatus.running ? '🟢 YES (http://localhost:42125)' : '⚪ STOPPED'}\n`);
+  });
+
+serviceCmd
+  .command('install')
+  .description('Install Synchronum as a silent background service (starts with Windows)')
+  .action(async () => {
+    try {
+      console.log('\n🔄 Installing Synchronum into OS Startup...');
+      const res = await installService();
+      console.log('✅ Synchronum Background Service installed successfully!');
+      console.log(`   Startup Launcher: ${res.scriptPath}`);
+      console.log('   Dashboard: http://localhost:42125\n');
+    } catch (err: any) {
+      console.error(`\n❌ Failed to install service: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+serviceCmd
+  .command('uninstall')
+  .description('Uninstall Synchronum from OS Startup and stop background process')
+  .action(async () => {
+    try {
+      console.log('\n🔄 Removing Synchronum from OS Startup...');
+      await uninstallService();
+      console.log('✅ Synchronum Background Service removed and stopped.\n');
+    } catch (err: any) {
+      console.error(`\n❌ Failed to uninstall service: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+serviceCmd
+  .command('start')
+  .description('Start background service immediately (silent without window)')
+  .action(async () => {
+    try {
+      console.log('\n🔄 Starting Synchronum in background...');
+      const started = await startService();
+      if (started) {
+        console.log('✅ Synchronum started! Running at http://localhost:42125\n');
+      } else {
+        console.log('⚠️  Could not confirm server startup within 3s.\n');
+      }
+    } catch (err: any) {
+      console.error(`\n❌ Failed to start service: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+serviceCmd
+  .command('stop')
+  .description('Stop running background service')
+  .action(async () => {
+    try {
+      console.log('\n🔄 Stopping Synchronum background service...');
+      await stopService();
+      console.log('✅ Synchronum stopped.\n');
+    } catch (err: any) {
+      console.error(`\n❌ Failed to stop service: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('config')
+  .description('View or update Synchronum configuration')
+  .option('--storage <type>', 'Storage type (gdrive or local_folder)')
+  .option('--folder <path>', 'Local folder path for sync')
+  .option('--auto-sync <boolean>', 'Enable or disable auto-sync (true/false)')
+  .option('--interval <minutes>', 'Auto-sync interval in minutes')
+  .action((options) => {
+    const current = loadConfig();
+    const updates: any = {};
+    if (options.storage) updates.storageType = options.storage;
+    if (options.folder) updates.localFolderPath = options.folder;
+    if (options.autoSync !== undefined) updates.autoSync = options.autoSync === 'true';
+    if (options.interval) updates.autoSyncIntervalMinutes = parseInt(options.interval, 10);
+
+    const saved = saveConfig(updates);
+    console.log('\n=== Synchronum Configuration ===');
+    console.log(`Storage Type:       ${saved.storageType}`);
+    console.log(`Local Folder Path:  ${saved.localFolderPath}`);
+    console.log(`Auto-Sync:          ${saved.autoSync ? '🟢 Enabled' : '⚪ Disabled'}`);
+    console.log(`Interval (minutes): ${saved.autoSyncIntervalMinutes}`);
+    console.log(`Last Sync Time:     ${saved.lastSyncTime || '(none)'}`);
+    console.log(`Autostart Service:  ${saved.autostartService ? '🟢 Enabled' : '⚪ Disabled'}\n`);
   });
 
 program.parse(process.argv);
