@@ -49,6 +49,15 @@ export function enhanceConversation(s: any): EnhancedConversationSummary {
   };
 }
 
+export function getConversationStorageSubpath(s: any, conversationId: string): string {
+  const enhanced = enhanceConversation(s);
+  if (enhanced.is_project && enhanced.project_name) {
+    const safeProject = enhanced.project_name.replace(/[<>:"/\\|?*]/g, '_').trim() || 'project';
+    return `projects/${safeProject}/session_${conversationId}.bundle.enc`;
+  }
+  return `standalone/session_${conversationId}.bundle.enc`;
+}
+
 export function getGroupedConversations(sqlite: AntigravitySqlite, limit = 100): {
   projects: ProjectGroup[];
   standalone: EnhancedConversationSummary[];

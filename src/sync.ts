@@ -9,6 +9,7 @@ import { getAntigravityPaths } from './paths.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { GoogleDriveStorageProvider, SyncStorageProvider } from './storage.js';
 import { DeviceInfo } from './types.js';
+import { getConversationStorageSubpath } from './projects.js';
 
 export interface RemoteSessionEntry {
   conversation_id: string;
@@ -78,7 +79,11 @@ export class SynchronumSyncEngine {
   }
 
   private getDeviceSessionPath(deviceId: string, conversationId: string): string {
-    return `devices/${deviceId}/sessions/session_${conversationId}.bundle.enc`;
+    const summary = this.sqlite.getSummary(conversationId);
+    const subpath = summary
+      ? getConversationStorageSubpath(summary, conversationId)
+      : `standalone/session_${conversationId}.bundle.enc`;
+    return `devices/${deviceId}/${subpath}`;
   }
 
   public async fetchDeviceIndex(deviceId: string, password: string): Promise<RemoteIndex> {

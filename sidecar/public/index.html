@@ -172,7 +172,7 @@
       </div>
 
       <!-- Content Scroll Container -->
-      <div id="content-scroll" class="flex-1 overflow-y-auto flex flex-col gap-3 pr-1 max-h-[460px]">
+      <div id="content-scroll" class="flex-1 overflow-y-auto space-y-3 pr-1 min-h-[400px]">
         <div class="text-slate-500 text-center py-10">Загрузка структуры проектов и диалогов...</div>
       </div>
     </section>
@@ -502,6 +502,7 @@
           `;
 
           filteredProjects.forEach(p => {
+            const safeId = 'proj_' + p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
             const gitBadge = p.gitStatus === 'git_tracked' 
               ? `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-mono truncate max-w-[200px]" title="${p.gitRemote}">🟢 Git: ${p.gitRemote ? p.gitRemote.split('/').pop().replace('.git', '') : 'Connected'}</span>`
               : `<span class="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[10px]">⚪ Локальный проект</span>`;
@@ -509,8 +510,8 @@
             const sessionsHtml = p.sessions.map(s => renderSessionRow(s)).join('');
 
             html += `
-              <div class="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-                <div class="p-3 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between gap-2">
+              <div class="block w-full bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm mb-2">
+                <div onclick="toggleCollapse('${safeId}')" class="p-3 bg-slate-950/70 border-b border-slate-800/80 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-900/80 transition">
                   <div class="flex items-center gap-2.5 min-w-0">
                     <span class="text-base shrink-0">📁</span>
                     <div class="min-w-0">
@@ -523,12 +524,13 @@
                     </div>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
-                    <button onclick="toggleCollapse('${p.name}')" class="text-slate-400 hover:text-slate-200 transition text-xs px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg">
-                      Диалоги ▼
+                    <button class="text-slate-400 hover:text-slate-200 transition text-xs px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg flex items-center gap-1">
+                      <span>Диалоги</span>
+                      <span id="chevron-${safeId}" class="text-[10px]">▼</span>
                     </button>
                   </div>
                 </div>
-                <div id="project-group-${p.name}" class="p-2 flex flex-col gap-1.5 bg-slate-900/40">
+                <div id="${safeId}" class="p-2 space-y-1.5 bg-slate-900/40">
                   ${sessionsHtml}
                 </div>
               </div>
@@ -546,7 +548,7 @@
 
         if (filteredStandalone.length > 0) {
           html += `
-            <div class="flex items-center justify-between mt-2 mb-1">
+            <div class="flex items-center justify-between mt-3 mb-1">
               <span class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                 <span>💬</span> Обычные диалоги (Вне проектов) (${filteredStandalone.length})
               </span>
@@ -554,7 +556,7 @@
           `;
 
           html += `
-            <div class="flex flex-col gap-1.5">
+            <div class="space-y-1.5 mb-2">
               ${filteredStandalone.map(s => renderSessionRow(s)).join('')}
             </div>
           `;
@@ -597,10 +599,14 @@
       `;
     }
 
-    function toggleCollapse(projectName) {
-      const el = document.getElementById(`project-group-${projectName}`);
+    function toggleCollapse(id) {
+      const el = document.getElementById(id);
+      const chevron = document.getElementById(`chevron-${id}`);
       if (el) {
         el.classList.toggle('hidden');
+        if (chevron) {
+          chevron.innerText = el.classList.contains('hidden') ? '▶' : '▼';
+        }
       }
     }
 
