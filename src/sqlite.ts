@@ -52,6 +52,20 @@ export class AntigravitySqlite {
     }
   }
 
+  public listAllSummariesWithRaw(): ConversationSummary[] {
+    const db = new DatabaseSync(this.summariesDbPath, { readOnly: true });
+    try {
+      const stmt = db.prepare(`
+        SELECT * 
+        FROM conversation_summaries
+        ORDER BY last_modified_time DESC
+      `);
+      return stmt.all() as unknown as ConversationSummary[];
+    } finally {
+      db.close();
+    }
+  }
+
   public getSummary(conversationId: string): ConversationSummary | null {
     const db = new DatabaseSync(this.summariesDbPath, { readOnly: true });
     try {

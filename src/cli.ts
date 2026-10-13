@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from './config.js';
 import { isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths, validateAntigravityPaths } from './paths.js';
+import { repairAndReconcileAll } from './projects.js';
 import { installService, isServiceInstalled, isServiceRunning, startService, stopService, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, LocalFolderStorageProvider } from './storage.js';
@@ -223,8 +224,31 @@ program
       console.log(`\n✅ Pull completed!`);
       console.log(`   Restored (${result.restored.length}): ${result.restored.join(', ') || 'None'}`);
       console.log(`   Up-to-date (${result.skipped.length}): ${result.skipped.join(', ') || 'None'}\n`);
+
+      console.log(`🔄 Reconciling Antigravity projects and binary protobuf...`);
+      const rep = repairAndReconcileAll();
+      console.log(`✅ Antigravity environment updated: ${rep.totalProjects} projects registered, ${rep.protoSynced} dialogues ready in IDE!\n`);
     } catch (err: any) {
       console.error(`\n❌ Pull failed: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('repair')
+  .description('Automatically repair Antigravity projects registry, layouts, and binary protobuf cache')
+  .action(() => {
+    try {
+      console.log('\n🔧 Running full Antigravity environment repair & reconciliation...');
+      const result = repairAndReconcileAll();
+      console.log(`\n✅ Repair completed successfully!`);
+      console.log(`   Projects remapped to local:  ${result.remappedCount}`);
+      console.log(`   Total projects registered:   ${result.totalProjects}`);
+      console.log(`   Dialogues in protobuf cache: ${result.protoSynced}`);
+      console.log(`   UI layout panes initialized: ${result.layoutsAdded}\n`);
+      console.log(`💡 Now press Ctrl+Shift+P in Antigravity -> "Developer: Reload Window" to see all dialogues!\n`);
+    } catch (err: any) {
+      console.error(`\n❌ Repair failed: ${err.message}\n`);
       process.exit(1);
     }
   });

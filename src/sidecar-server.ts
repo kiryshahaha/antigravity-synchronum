@@ -13,7 +13,7 @@ import { SynchronumBundler } from './bundler.js';
 import { loadConfig, saveConfig, SynchronumConfig } from './config.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
-import { getGroupedConversations } from './projects.js';
+import { getGroupedConversations, repairAndReconcileAll } from './projects.js';
 import { installService, isServiceInstalled, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, SyncStorageProvider } from './storage.js';
@@ -58,6 +58,11 @@ async function runAutoSyncCycle(): Promise<void> {
     const result = await engine.syncAll(config.masterPassword);
     saveConfig({ lastSyncTime: new Date().toISOString() });
     console.log(`[Auto-Sync] Completed: Pushed ${result.pushed.length}, Restored ${result.restored.length}, Skipped ${result.skipped.length}`);
+
+    // Auto-reconcile Antigravity project registry and proto cache
+    try {
+      repairAndReconcileAll();
+    } catch {}
   } catch (err: any) {
     console.error('[Auto-Sync Error]', err.message);
   } finally {
@@ -68,13 +73,16 @@ async function runAutoSyncCycle(): Promise<void> {
 // Run auto-sync check every 30 seconds
 setInterval(runAutoSyncCycle, 30000);
 
-// Run initial sync cycle 3 seconds after startup
+// Run initial sync cycle and reconciliation on startup
 setTimeout(() => {
+  try {
+    repairAndReconcileAll();
+  } catch {}
   const cfg = loadConfig();
   if (cfg.masterPassword) {
     runAutoSyncCycle().catch(() => {});
   }
-}, 3000);
+}, 2000);
 
 // Helper to parse multipart/form-data or json
 function parseBody(req: http.IncomingMessage): Promise<any> {
@@ -244,8 +252,27 @@ const server = http.createServer(async (req, res) => {
       const syncResult = await engine.syncAll(password);
       saveConfig({ lastSyncTime: new Date().toISOString() });
 
+      // Ensure full Antigravity reconciliation
+      let repairStats = null;
+      try {
+        repairStats = repairAndReconcileAll();
+      } catch {}
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, result: syncResult }));
+      res.end(JSON.stringify({ success: true, result: syncResult, repair: repairStats }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 4.1 Manual Antigravity Environment Repair API
+  if (url.pathname === '/api/repair' && req.method === 'POST') {
+    try {
+      const stats = repairAndReconcileAll();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, stats }));
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getAntigravityPaths } from './paths.js';
 import { PathResolver } from './path-resolver.js';
+import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { EnhancedConversationSummary, ProjectGroup } from './types.js';
 
@@ -272,5 +273,131 @@ export function getGroupedConversations(sqlite: AntigravitySqlite, limit = 100):
     projects,
     standalone,
     totalCount: summaries.length,
+  };
+}
+
+export function repairAndReconcileAll(): {
+  remappedCount: number;
+  newProjectsCount: number;
+  totalProjects: number;
+  protoSynced: number;
+  layoutsAdded: number;
+} {
+  const paths = getAntigravityPaths();
+  fs.mkdirSync(paths.configProjectsDir, { recursive: true });
+
+  // 1. Ensure outside-of-project.json exists
+  ensureOutsideOfProjectConfigExists();
+
+  // 2. Load existing local projects
+  const files = fs.readdirSync(paths.configProjectsDir).filter((f) => f.endsWith('.json') && f !== 'outside-of-project.json');
+  const localProjects: Array<{ id: string; name: string; folderUri: string }> = [];
+  for (const f of files) {
+    try {
+      const p = JSON.parse(fs.readFileSync(path.join(paths.configProjectsDir, f), 'utf8'));
+      const folderUri = p.projectResources?.resources?.[0]?.gitFolder?.folderUri || '';
+      localProjects.push({ id: p.id, name: p.name, folderUri });
+    } catch {}
+  }
+
+  // 3. Connect to DB and inspect all summaries
+  const sqlite = new AntigravitySqlite(paths.summariesDbPath);
+  const rows = sqlite.listAllSummariesWithRaw();
+
+  const cleanName = (n: string) => n.toLowerCase().trim().replace(/[-_]/g, '');
+
+  let remappedCount = 0;
+  for (const row of rows) {
+    if (!row.project_id || row.project_id === 'outside-of-project') continue;
+
+    // Check if this project_id exists locally
+    const exactMatch = localProjects.find((lp) => lp.id === row.project_id);
+    if (exactMatch) continue;
+
+    // Not in localProjects, try to find matching local project by folder name or git
+    let uris: string[] = [];
+    try {
+      uris = JSON.parse(row.workspace_uris || '[]');
+    } catch {}
+    const primaryUri = uris[0] || '';
+    const wsPath = PathResolver.uriToPath(primaryUri);
+    const folderName = path.basename(wsPath);
+
+    let match = findLocalProjectMatch(folderName, undefined, primaryUri);
+    if (!match && (cleanName(folderName) === 'synchronum' || cleanName(folderName) === 'antigravitysynchronum')) {
+      match = localProjects.find((lp) => cleanName(lp.name).includes('synchronum')) || null;
+    }
+
+    if (match) {
+      // Remap to existing local project
+      let patchedRaw = row.raw_summary;
+      if (patchedRaw) {
+        const rawBuf = Buffer.isBuffer(patchedRaw) ? patchedRaw : Buffer.from(patchedRaw);
+        const oldId = row.project_id;
+        const newId = match.id;
+        if (rawBuf.includes(oldId)) {
+          const str = rawBuf.toString('binary').replaceAll(oldId, newId);
+          patchedRaw = Buffer.from(str, 'binary');
+        }
+      }
+      const newUris = JSON.stringify([match.folderUri || primaryUri]);
+      sqlite.upsertSummary({
+        ...row,
+        project_id: match.id,
+        workspace_uris: newUris,
+        raw_summary: patchedRaw,
+      });
+      remappedCount++;
+    } else {
+      // Create project config
+      ensureProjectConfigExists(row.project_id, folderName || row.project_id, primaryUri);
+      localProjects.push({ id: row.project_id, name: folderName, folderUri: primaryUri });
+    }
+  }
+
+  // 4. Update app_storage.json
+  let layoutsAdded = 0;
+  let totalProjects = localProjects.length;
+  try {
+    if (fs.existsSync(paths.appStoragePath)) {
+      const storage = JSON.parse(fs.readFileSync(paths.appStoragePath, 'utf8'));
+      let order: string[] = [];
+      try {
+        order = JSON.parse(storage.projectsOrder || '[]');
+      } catch {}
+
+      const allConfigIds = fs.readdirSync(paths.configProjectsDir)
+        .filter((f) => f.endsWith('.json') && f !== 'outside-of-project.json')
+        .map((f) => f.replace('.json', ''));
+
+      for (const cid of allConfigIds) {
+        if (!order.includes(cid)) order.push(cid);
+      }
+      storage.projectsOrder = JSON.stringify(order);
+      totalProjects = order.length;
+
+      for (const row of rows) {
+        const key = `antigravity-multi-conversation-layout-v3-${row.conversation_id}`;
+        if (!storage[key]) {
+          storage[key] = JSON.stringify({
+            rootNode: { type: 'pane', id: 'pane-1', cascadeId: row.conversation_id },
+            focusedPaneId: 'pane-1',
+          });
+          layoutsAdded++;
+        }
+      }
+      fs.writeFileSync(paths.appStoragePath, JSON.stringify(storage, null, 2), 'utf8');
+    }
+  } catch {}
+
+  // 5. Rebuild agyhub_summaries_proto.pb
+  const protoSynced = syncAgyhubProtoFromDb(paths.summariesDbPath, paths.agyhubProtoPath);
+
+  return {
+    remappedCount,
+    newProjectsCount: localProjects.length,
+    totalProjects,
+    protoSynced,
+    layoutsAdded,
   };
 }
