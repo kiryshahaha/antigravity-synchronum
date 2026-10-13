@@ -209,10 +209,36 @@ export class SynchronumBundler {
       }
     } catch {}
 
+    // If targetProjectId changed (e.g. remapped to local project), patch raw_summary protobuf too
+    let patchedRawSummary = originalSummary.raw_summary;
+    if (patchedRawSummary && originalSummary.project_id && targetProjectId !== originalSummary.project_id) {
+      try {
+        let rawBuf: Buffer;
+        if (Buffer.isBuffer(patchedRawSummary)) rawBuf = patchedRawSummary;
+        else if (patchedRawSummary instanceof Uint8Array) rawBuf = Buffer.from(patchedRawSummary);
+        else if (typeof patchedRawSummary === 'object') {
+          const vals = Object.values(patchedRawSummary);
+          rawBuf = Buffer.from(vals as number[]);
+        } else {
+          rawBuf = Buffer.from(patchedRawSummary as any);
+        }
+
+        const oldId = originalSummary.project_id;
+        const newId = targetProjectId;
+        if (oldId.length === 36 && newId.length === 36 && rawBuf.includes(oldId)) {
+          const str = rawBuf.toString('binary').replaceAll(oldId, newId);
+          patchedRawSummary = Buffer.from(str, 'binary');
+        }
+      } catch (err: any) {
+        console.warn('[Raw Summary Patch Warning]', err.message);
+      }
+    }
+
     const summaryToUpsert: ConversationSummary = {
       ...originalSummary,
       conversation_id: conversationId,
       project_id: targetProjectId,
+      raw_summary: patchedRawSummary,
       title: manifest.title || originalSummary.title,
       step_count: manifest.step_count || originalSummary.step_count,
       last_modified_time: manifest.last_modified_time || originalSummary.last_modified_time,
