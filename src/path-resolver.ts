@@ -58,6 +58,21 @@ export class PathResolver {
       return JSON.stringify([newUri]);
     }
 
+    // Flatten and parse knownWorkspaceUris so JSON strings don't break uriToPath
+    const cleanKnownUris: string[] = [];
+    if (options.knownWorkspaceUris) {
+      for (const item of options.knownWorkspaceUris) {
+        try {
+          const parsed = JSON.parse(item);
+          if (Array.isArray(parsed)) cleanKnownUris.push(...parsed);
+          else if (typeof parsed === 'string') cleanKnownUris.push(parsed);
+          else cleanKnownUris.push(item);
+        } catch {
+          cleanKnownUris.push(item);
+        }
+      }
+    }
+
     const translated = uris.map((uri) => {
       const originalPath = PathResolver.uriToPath(uri);
 
@@ -67,12 +82,12 @@ export class PathResolver {
       }
 
       // If git remote is provided and we have known local workspaces
-      if (options.gitRemote && options.knownWorkspaceUris) {
-        for (const knownUri of options.knownWorkspaceUris) {
+      if (options.gitRemote && cleanKnownUris.length > 0) {
+        for (const knownUri of cleanKnownUris) {
           const knownPath = PathResolver.uriToPath(knownUri);
           if (fs.existsSync(knownPath)) {
             const remote = PathResolver.getGitRemote(knownPath);
-            if (remote && remote === options.gitRemote) {
+            if (remote && remote.toLowerCase() === options.gitRemote.toLowerCase()) {
               return knownUri;
             }
           }

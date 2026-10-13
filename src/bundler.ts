@@ -184,9 +184,35 @@ export class SynchronumBundler {
       }
     );
 
+    // Match local project_id if the translated workspace uri matches an existing local project
+    let targetProjectId = originalSummary.project_id;
+    try {
+      const parsedUris = JSON.parse(translatedWorkspaceUris || '[]');
+      if (Array.isArray(parsedUris) && parsedUris.length > 0) {
+        const primaryUri = parsedUris[0];
+        const existingProjectMatch = this.sqlite.listSummaries(500).find((s) => {
+          try {
+            const sUris = JSON.parse(s.workspace_uris || '[]');
+            return (
+              Array.isArray(sUris) &&
+              sUris.includes(primaryUri) &&
+              s.project_id &&
+              s.project_id !== 'outside-of-project'
+            );
+          } catch {
+            return false;
+          }
+        });
+        if (existingProjectMatch && existingProjectMatch.project_id) {
+          targetProjectId = existingProjectMatch.project_id;
+        }
+      }
+    } catch {}
+
     const summaryToUpsert: ConversationSummary = {
       ...originalSummary,
       conversation_id: conversationId,
+      project_id: targetProjectId,
       title: manifest.title || originalSummary.title,
       step_count: manifest.step_count || originalSummary.step_count,
       last_modified_time: manifest.last_modified_time || originalSummary.last_modified_time,
