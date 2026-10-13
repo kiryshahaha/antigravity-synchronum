@@ -40,15 +40,22 @@ export function getDefaultLocalFolderPath(): string {
   return path.join(os.homedir(), 'AntigravitySync');
 }
 
+export function getDefaultDeviceName(): string {
+  const host = os.hostname().toLowerCase();
+  if (host.includes('laptop')) return 'Laptop-Work';
+  if (host.includes('desktop') || host.includes('pc')) return 'Home-PC';
+  return os.hostname();
+}
+
 export function getDefaultConfig(): SynchronumConfig {
   return {
     storageType: 'local_folder',
     localFolderPath: getDefaultLocalFolderPath(),
-    autoSync: false,
+    autoSync: true,
     autoSyncIntervalMinutes: 5,
     autostartService: false,
     deviceId: getDefaultDeviceId(),
-    deviceName: 'Laptop-Work',
+    deviceName: getDefaultDeviceName(),
   };
 }
 

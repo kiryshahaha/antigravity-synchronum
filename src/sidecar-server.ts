@@ -189,6 +189,14 @@ const server = http.createServer(async (req, res) => {
       const updated = saveConfig(body);
       currentConfig = updated;
       currentStorage = createStorageProvider(updated, oauth);
+
+      // Trigger sync immediately if master password is present
+      if (updated.masterPassword) {
+        setTimeout(() => {
+          runAutoSyncCycle().catch((e) => console.error('[Config Auto-Sync]', e.message));
+        }, 200);
+      }
+
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, config: updated }));
       return;

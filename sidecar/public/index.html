@@ -149,6 +149,14 @@
     <!-- Main Content: Projects & Conversations -->
     <section class="flex-1 flex flex-col gap-3 min-h-0 bg-slate-900/60 border border-slate-800/80 rounded-xl p-3.5 shadow-md">
       
+      <!-- Password Guidance Banner -->
+      <div id="password-banner" class="hidden bg-amber-500/10 border border-amber-500/30 text-amber-300 p-3 rounded-xl flex items-center justify-between text-xs">
+        <div class="flex items-center gap-2">
+          <span class="text-base shrink-0">🔒</span>
+          <span><strong>Первый запуск:</strong> введите ваш мастер-пароль выше и нажмите «Сохранить» — система автоматически расшифрует облачное хранилище и подтянет все ваши диалоги.</span>
+        </div>
+      </div>
+
       <!-- Filter Bar & Search -->
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
         <!-- View Filter Tabs -->
@@ -249,10 +257,14 @@
           masterPassword = currentConfig.masterPassword;
           localStorage.setItem('synchronum_master_password', masterPassword);
         }
+        const banner = document.getElementById('password-banner');
         if (masterPassword) {
           document.getElementById('master-password').value = masterPassword;
           document.getElementById('lock-indicator').innerText = 'Задан 🔒';
           document.getElementById('lock-indicator').className = 'text-[10px] text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20 font-mono';
+          if (banner) banner.classList.add('hidden');
+        } else {
+          if (banner) banner.classList.remove('hidden');
         }
       } catch (err) {}
     }
@@ -322,14 +334,20 @@
       document.getElementById('lock-indicator').innerText = 'Задан 🔒';
       document.getElementById('lock-indicator').className = 'text-[10px] text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-400/20 font-mono';
       
+      const banner = document.getElementById('password-banner');
+      if (banner) banner.classList.add('hidden');
+
+      showToast('Мастер-пароль сохранён! Запускаем автоматическую синхронизацию...');
+      
       await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ masterPassword: val })
+        body: JSON.stringify({ masterPassword: val, autoSync: true })
       });
       
-      showToast('Мастер-пароль сохранен!');
+      document.getElementById('checkbox-auto-sync').checked = true;
       loadDevices();
+      syncNow();
     }
 
     async function loadDevices() {
