@@ -47,3 +47,31 @@ export interface ExportOptions {
   password?: string;
   includeBrain?: boolean;
 }
+
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  hostname: string;
+  platform: string;
+  updated_at: string;
+  sessions_count: number;
+}
+
+export interface EnhancedConversationSummary extends ConversationSummary {
+  display_title: string;
+  is_project: boolean;
+  project_name?: string;
+  git_remote?: string;
+  git_status: 'git_tracked' | 'local_only' | 'no_workspace';
+}
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+  workspacePath: string;
+  workspaceUri: string;
+  gitRemote?: string;
+  gitStatus: 'git_tracked' | 'local_only' | 'no_workspace';
+  lastModifiedTime: string;
+  sessions: EnhancedConversationSummary[];
+}

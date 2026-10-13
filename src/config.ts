@@ -10,9 +10,15 @@ export interface SynchronumConfig {
   lastSyncTime?: string;
   autostartService: boolean;
   masterPassword?: string;
+  deviceId?: string;
+  deviceName?: string;
 }
 
 const CONFIG_FILE_PATH = path.join(os.homedir(), '.gemini', 'antigravity', 'synchronum_config.json');
+
+export function getDefaultDeviceId(): string {
+  return os.hostname().replace(/[^a-zA-Z0-9_-]/g, '_');
+}
 
 export function getDefaultLocalFolderPath(): string {
   // Check common Google Drive virtual drive or user folder
@@ -41,6 +47,8 @@ export function getDefaultConfig(): SynchronumConfig {
     autoSync: false,
     autoSyncIntervalMinutes: 5,
     autostartService: false,
+    deviceId: getDefaultDeviceId(),
+    deviceName: 'Laptop-Work',
   };
 }
 

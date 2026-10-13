@@ -13,6 +13,7 @@ import { SynchronumBundler } from './bundler.js';
 import { loadConfig, saveConfig, SynchronumConfig } from './config.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
+import { getGroupedConversations } from './projects.js';
 import { installService, isServiceInstalled, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, SyncStorageProvider } from './storage.js';
@@ -42,38 +43,21 @@ let isSyncing = false;
 async function runAutoSyncCycle(): Promise<void> {
   if (isSyncing) return;
   const config = loadConfig();
-  if (!config.autoSync || !config.masterPassword) return;
+  if (!config.masterPassword) return;
 
   const intervalMs = Math.max(1, config.autoSyncIntervalMinutes || 5) * 60 * 1000;
   const lastSync = config.lastSyncTime ? new Date(config.lastSyncTime).getTime() : 0;
-  if (Date.now() - lastSync < intervalMs) return;
+  if (!config.autoSync && lastSync > 0) return; // Only skip if not autoSync and not first run
+  if (config.autoSync && Date.now() - lastSync < intervalMs) return;
 
   isSyncing = true;
   try {
     const engine = getSyncEngine();
-    console.log(`[Auto-Sync] Running periodic synchronization via ${currentStorage.name}...`);
+    console.log(`[Auto-Sync] Running two-way sync for device ${engine.getDeviceName()}...`);
 
-    // 1. Pull remote updates first
-    await engine.pullAll(config.masterPassword);
-
-    // 2. Find sessions modified since last sync (or last 24h) and push
-    const summaries = sqlite.listSummaries(100);
-    const syncCutoff = lastSync || Date.now() - 24 * 3600 * 1000;
-
-    for (const s of summaries) {
-      const modTime = s.last_modified_time ? new Date(s.last_modified_time).getTime() : 0;
-      if (modTime > syncCutoff) {
-        try {
-          await engine.pushSession(s.conversation_id, config.masterPassword);
-          console.log(`[Auto-Sync] Pushed updated session: ${s.title || s.conversation_id}`);
-        } catch (e: any) {
-          console.error(`[Auto-Sync] Failed to push session ${s.conversation_id}:`, e.message);
-        }
-      }
-    }
-
+    const result = await engine.syncAll(config.masterPassword);
     saveConfig({ lastSyncTime: new Date().toISOString() });
-    console.log('[Auto-Sync] Cycle completed successfully.');
+    console.log(`[Auto-Sync] Completed: Pushed ${result.pushed.length}, Restored ${result.restored.length}, Skipped ${result.skipped.length}`);
   } catch (err: any) {
     console.error('[Auto-Sync Error]', err.message);
   } finally {
@@ -83,6 +67,14 @@ async function runAutoSyncCycle(): Promise<void> {
 
 // Run auto-sync check every 30 seconds
 setInterval(runAutoSyncCycle, 30000);
+
+// Run initial sync cycle 3 seconds after startup
+setTimeout(() => {
+  const cfg = loadConfig();
+  if (cfg.masterPassword) {
+    runAutoSyncCycle().catch(() => {});
+  }
+}, 3000);
 
 // Helper to parse multipart/form-data or json
 function parseBody(req: http.IncomingMessage): Promise<any> {
@@ -144,6 +136,7 @@ const server = http.createServer(async (req, res) => {
     const config = loadConfig();
     const storage = createStorageProvider(config, oauth);
     const isAvail = await storage.isAvailable();
+    const engine = getSyncEngine();
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(
@@ -151,6 +144,8 @@ const server = http.createServer(async (req, res) => {
         status: 'connected',
         platform: process.platform,
         hostname: os.hostname(),
+        deviceId: engine.getDeviceId(),
+        deviceName: engine.getDeviceName(),
         antigravityDir: paths.root,
         totalConversations: sqlite.listSummaries(1000).length,
         googleDriveConnected: oauth.isAuthenticated(),
@@ -163,6 +158,21 @@ const server = http.createServer(async (req, res) => {
         serviceInstalled: isServiceInstalled(),
       })
     );
+    return;
+  }
+
+  // 1.1 Devices List API
+  if (url.pathname === '/api/devices') {
+    try {
+      const engine = getSyncEngine();
+      const config = loadConfig();
+      const devices = await engine.listAllDevices(config.masterPassword);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(devices));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
     return;
   }
 
@@ -210,8 +220,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 4. Instant Sync API
-  if (url.pathname === '/api/sync-now' && req.method === 'POST') {
+  // 4. Instant Safe Sync API (Two-Way)
+  if ((url.pathname === '/api/sync-now' || url.pathname === '/api/pull') && req.method === 'POST') {
     const body = await parseBody(req);
     const password = body.password || loadConfig().masterPassword;
 
@@ -223,11 +233,11 @@ const server = http.createServer(async (req, res) => {
 
     try {
       const engine = getSyncEngine();
-      const pullResult = await engine.pullAll(password);
+      const syncResult = await engine.syncAll(password);
       saveConfig({ lastSyncTime: new Date().toISOString() });
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, result: pullResult }));
+      res.end(JSON.stringify({ success: true, result: syncResult }));
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
@@ -235,7 +245,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 5. Conversations List API
+  // 5. Grouped Conversations & Projects API
+  if (url.pathname === '/api/grouped-conversations') {
+    try {
+      const limit = parseInt(url.searchParams.get('limit') || '200', 10);
+      const grouped = getGroupedConversations(sqlite, limit);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(grouped));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 5.1 Raw Conversations List API
   if (url.pathname === '/api/conversations') {
     try {
       const limit = parseInt(url.searchParams.get('limit') || '50', 10);

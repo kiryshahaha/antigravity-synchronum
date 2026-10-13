@@ -6,7 +6,8 @@ import { DriveFileInfo, GoogleDriveAppDataClient, GoogleDriveOAuth } from './gdr
 export interface SyncStorageProvider {
   readonly type: 'gdrive' | 'local_folder';
   readonly name: string;
-  listFiles(): Promise<DriveFileInfo[]>;
+  listFiles(subDir?: string): Promise<DriveFileInfo[]>;
+  listDevices(): Promise<string[]>;
   downloadFile(fileIdOrName: string): Promise<Buffer>;
   uploadFile(name: string, content: Buffer, mimeType?: string): Promise<string>;
   deleteFile(fileIdOrName: string): Promise<void>;
@@ -25,6 +26,18 @@ export class GoogleDriveStorageProvider implements SyncStorageProvider {
 
   public async listFiles(): Promise<DriveFileInfo[]> {
     return this.client.listFiles();
+  }
+
+  public async listDevices(): Promise<string[]> {
+    const files = await this.client.listFiles();
+    const devices = new Set<string>();
+    for (const f of files) {
+      const match = f.name.match(/^devices\/([^\/]+)\//);
+      if (match) {
+        devices.add(match[1]);
+      }
+    }
+    return Array.from(devices);
   }
 
   public async downloadFile(fileId: string): Promise<Buffer> {
@@ -66,31 +79,56 @@ export class LocalFolderStorageProvider implements SyncStorageProvider {
     }
   }
 
-  public async listFiles(): Promise<DriveFileInfo[]> {
+  public async listFiles(subDir = ''): Promise<DriveFileInfo[]> {
     this.ensureFolder();
-    if (!fs.existsSync(this.targetFolder)) {
+    const target = path.join(this.targetFolder, subDir);
+    if (!fs.existsSync(target)) {
       return [];
     }
 
-    const entries = fs.readdirSync(this.targetFolder);
     const files: DriveFileInfo[] = [];
-
-    for (const name of entries) {
-      const fullPath = path.join(this.targetFolder, name);
+    const scan = (dir: string, relativeDir = '') => {
       try {
-        const stat = fs.statSync(fullPath);
-        if (stat.isFile()) {
-          files.push({
-            id: name,
-            name,
-            size: String(stat.size),
-            modifiedTime: stat.mtime.toISOString(),
-          });
+        const entries = fs.readdirSync(dir);
+        for (const name of entries) {
+          const fullPath = path.join(dir, name);
+          const rel = relativeDir ? `${relativeDir}/${name}` : name;
+          try {
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) {
+              files.push({
+                id: rel,
+                name: rel,
+                size: String(stat.size),
+                modifiedTime: stat.mtime.toISOString(),
+              });
+            } else if (stat.isDirectory()) {
+              scan(fullPath, rel);
+            }
+          } catch {}
         }
       } catch {}
-    }
+    };
 
+    scan(target, subDir ? subDir.replace(/\\/g, '/') : '');
     return files;
+  }
+
+  public async listDevices(): Promise<string[]> {
+    const devicesDir = path.join(this.targetFolder, 'devices');
+    if (!fs.existsSync(devicesDir)) return [];
+    try {
+      const entries = fs.readdirSync(devicesDir);
+      return entries.filter((e) => {
+        try {
+          return fs.statSync(path.join(devicesDir, e)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      return [];
+    }
   }
 
   public async downloadFile(fileName: string): Promise<Buffer> {
@@ -104,6 +142,7 @@ export class LocalFolderStorageProvider implements SyncStorageProvider {
   public async uploadFile(name: string, content: Buffer): Promise<string> {
     this.ensureFolder();
     const fullPath = path.join(this.targetFolder, name);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content);
     return name;
   }
