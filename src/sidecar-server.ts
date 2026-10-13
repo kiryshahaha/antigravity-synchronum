@@ -476,6 +476,16 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
+server.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[Synchronum Sidecar] Сервис уже запущен и работает на http://127.0.0.1:${PORT}`);
+    process.exit(0);
+  } else {
+    console.error('[Synchronum Server Error]', err);
+    process.exit(1);
+  }
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[Synchronum Sidecar] Running Aux Pane dashboard on http://127.0.0.1:${PORT}`);
 });

@@ -33,6 +33,9 @@ xcopy /s /y /q "dist\*" "%SIDECAR_TARGET%\dist\" >nul 2>nul
 echo [✓] Sidecar successfully registered in Antigravity!
 
 echo.
+echo [*] Freeing port 42125 if occupied...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 42125 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>nul
+
 echo [*] Launching Synchronum Dashboard...
 start http://localhost:42125
 

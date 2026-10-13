@@ -7,6 +7,9 @@ If Not fso.FileExists(strDir & "\dist\sidecar-server.js") Then
     WshShell.Run "cmd /c cd /d """ & strDir & """ && npm run build", 0, True
 End If
 
+' Stop any existing instance to avoid EADDRINUSE
+WshShell.Run "cmd /c """ & strDir & "\stop.bat""", 0, True
+
 ' Launch node silently (0 = SW_HIDE, hidden window)
 strCmd = "cmd /c node --experimental-sqlite """ & strDir & "\dist\sidecar-server.js"""
 WshShell.CurrentDirectory = strDir
