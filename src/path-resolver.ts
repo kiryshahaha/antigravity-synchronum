@@ -7,10 +7,19 @@ export class PathResolver {
   public static getGitRemote(dirPath: string): string | null {
     if (!fs.existsSync(dirPath)) return null;
     try {
+      const gitConfigFile = path.join(dirPath, '.git', 'config');
+      if (fs.existsSync(gitConfigFile)) {
+        const content = fs.readFileSync(gitConfigFile, 'utf-8');
+        const match = content.match(/\[remote\s+"origin"\][^\[]*url\s*=\s*([^\r\n]+)/i);
+        if (match && match[1]) {
+          return match[1].trim();
+        }
+      }
       const output = execSync('git config --get remote.origin.url', {
         cwd: dirPath,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'ignore'],
+        timeout: 500,
       }).trim();
       return output || null;
     } catch {

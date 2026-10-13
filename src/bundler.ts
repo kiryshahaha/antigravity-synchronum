@@ -9,6 +9,7 @@ import {
   ensureConversationLayout,
   ensureOutsideOfProjectConfigExists,
   ensureProjectConfigExists,
+  findCanonicalProject,
   findLocalProjectMatch,
 } from './projects.js';
 import { syncAgyhubProtoFromDb } from './proto-sync.js';
@@ -201,8 +202,8 @@ export class SynchronumBundler {
         const wsPath = PathResolver.uriToPath(primaryUri);
         const projectName = path.basename(wsPath) || manifest.title || 'project';
 
-        // 1. Try to match to an existing local project
-        const match = findLocalProjectMatch(projectName, manifest.git_remote, primaryUri);
+        // 1. Match to the canonical local project on this machine
+        const match = findCanonicalProject(projectName, manifest.git_remote, primaryUri, targetProjectId);
         if (match) {
           targetProjectId = match.id;
           if (match.folderUri) {
