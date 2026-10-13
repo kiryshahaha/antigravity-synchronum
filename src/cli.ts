@@ -187,16 +187,18 @@ program
 
 program
   .command('push <conversationId>')
-  .description('Encrypt and upload a conversation to Google Drive (appDataFolder)')
+  .description('Encrypt and upload a conversation to configured storage')
   .requiredOption('-p, --password <password>', 'Master password for E2EE encryption')
   .action(async (conversationId, options) => {
     try {
+      const config = loadConfig();
       const oauth = new GoogleDriveOAuth();
-      const engine = new SynchronumSyncEngine(oauth);
-      console.log(`\n🔄 Encrypting and pushing session [${conversationId}] to Google Drive...`);
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Encrypting and pushing session [${conversationId}] via ${storage.name}...`);
 
       const result = await engine.pushSession(conversationId, options.password);
-      console.log(`✅ Successfully pushed to Google Drive!`);
+      console.log(`✅ Successfully pushed!`);
       console.log(`   Title: ${result.title}`);
       console.log(`   Size:  ${(result.bytes / 1024).toFixed(2)} KB\n`);
     } catch (err: any) {
@@ -207,13 +209,15 @@ program
 
 program
   .command('pull')
-  .description('Download and restore updated sessions from Google Drive')
+  .description('Download and restore updated sessions from storage')
   .requiredOption('-p, --password <password>', 'Master password for E2EE decryption')
   .action(async (options) => {
     try {
+      const config = loadConfig();
       const oauth = new GoogleDriveOAuth();
-      const engine = new SynchronumSyncEngine(oauth);
-      console.log(`\n🔄 Checking Google Drive for updated conversations...`);
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Checking ${storage.name} for updated conversations...`);
 
       const result = await engine.pullAll(options.password);
       console.log(`\n✅ Pull completed!`);
@@ -227,18 +231,20 @@ program
 
 program
   .command('cloud-list')
-  .description('List sessions stored in Google Drive appDataFolder')
+  .description('List sessions stored in storage provider')
   .requiredOption('-p, --password <password>', 'Master password for E2EE decryption')
   .action(async (options) => {
     try {
+      const config = loadConfig();
       const oauth = new GoogleDriveOAuth();
-      const engine = new SynchronumSyncEngine(oauth);
-      console.log(`\n🔄 Fetching remote session catalog from Google Drive...`);
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Fetching session catalog from ${storage.name}...`);
 
       const index = await engine.fetchRemoteIndex(options.password);
       const list = Object.values(index.sessions);
 
-      console.log(`\n=== Google Drive Sessions (${list.length} total) ===\n`);
+      console.log(`\n=== Remote Sessions (${list.length} total) ===\n`);
       list.forEach((s, idx) => {
         console.log(`${(idx + 1).toString().padStart(2)}. [${s.conversation_id}]`);
         console.log(`    Title:    ${s.title}`);
@@ -248,7 +254,7 @@ program
       });
       console.log('');
     } catch (err: any) {
-      console.error(`\n❌ Cloud list failed: ${err.message}\n`);
+      console.error(`\n❌ Listing failed: ${err.message}\n`);
       process.exit(1);
     }
   });
