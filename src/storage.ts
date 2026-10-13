@@ -41,7 +41,17 @@ export class GoogleDriveStorageProvider implements SyncStorageProvider {
   }
 
   public async downloadFile(fileId: string): Promise<Buffer> {
-    return this.client.downloadFile(fileId);
+    try {
+      return await this.client.downloadFile(fileId);
+    } catch (err) {
+      const baseName = path.basename(fileId);
+      const allFiles = await this.client.listFiles();
+      const match = allFiles.find((f) => f.name.endsWith(baseName));
+      if (match) {
+        return await this.client.downloadFile(match.id);
+      }
+      throw err;
+    }
   }
 
   public async uploadFile(name: string, content: Buffer, mimeType = 'application/octet-stream'): Promise<string> {
@@ -131,10 +141,34 @@ export class LocalFolderStorageProvider implements SyncStorageProvider {
     }
   }
 
+  private findFileRecursive(dir: string, targetName: string): string | null {
+    if (!fs.existsSync(dir)) return null;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name === targetName) {
+          return full;
+        } else if (entry.isDirectory()) {
+          const found = this.findFileRecursive(full, targetName);
+          if (found) return found;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   public async downloadFile(fileName: string): Promise<Buffer> {
-    const fullPath = path.join(this.targetFolder, fileName);
+    let fullPath = path.join(this.targetFolder, fileName);
     if (!fs.existsSync(fullPath)) {
-      throw new Error(`Файл не найден в локальном хранилище: ${fileName}`);
+      // Fallback: search recursively in targetFolder for the bundle filename
+      const baseName = path.basename(fileName);
+      const found = this.findFileRecursive(this.targetFolder, baseName);
+      if (found) {
+        fullPath = found;
+      } else {
+        throw new Error(`Файл не найден в локальном хранилище: ${fileName}`);
+      }
     }
     return fs.readFileSync(fullPath);
   }
