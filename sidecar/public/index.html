@@ -71,7 +71,10 @@
       <button onclick="toggleService()" id="btn-service" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs whitespace-nowrap shadow-sm">
         Включить автозапуск
       </button>
-      <button onclick="syncNow()" id="btn-sync-now" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs flex items-center gap-1 shadow-sm">
+      <button onclick="pullStorage()" id="btn-pull" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs flex items-center gap-1 shadow-sm" title="Загрузить обновленные диалоги с Google Диска">
+        <span>⬇️</span> Подтянуть (Pull)
+      </button>
+      <button onclick="syncNow()" id="btn-sync-now" class="bg-sky-600 hover:bg-sky-500 text-white font-medium px-3 py-1.5 rounded-lg transition text-xs flex items-center gap-1 shadow-sm" title="Полная синхронизация">
         <span>⚡</span> Синхронизировать
       </button>
     </div>
@@ -277,6 +280,33 @@
       });
       showToast(enabled ? 'Авто-синхронизация включена (каждые 5 мин)' : 'Авто-синхронизация отключена');
       checkStatus();
+    }
+
+    async function pullStorage() {
+      if (!masterPassword) {
+        showToast('Задайте мастер-пароль для расшифровки!', 'error');
+        return;
+      }
+      showToast('Загрузка обновлений с диска...');
+      try {
+        const res = await fetch('/api/pull', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: masterPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          const restoredCount = data.result.restored ? data.result.restored.length : 0;
+          const skippedCount = data.result.skipped ? data.result.skipped.length : 0;
+          showToast(`Pull завершён: ${restoredCount} обновлено, ${skippedCount} актуально`);
+          loadSessions();
+          checkStatus();
+        } else {
+          showToast('Ошибка Pull: ' + (data.error || 'Проверьте хранилище'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при вызове Pull', 'error');
+      }
     }
 
     async function syncNow() {
