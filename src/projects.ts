@@ -1,8 +1,172 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { getAntigravityPaths } from './paths.js';
 import { PathResolver } from './path-resolver.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { EnhancedConversationSummary, ProjectGroup } from './types.js';
+
+export function ensureOutsideOfProjectConfigExists(): void {
+  const paths = getAntigravityPaths();
+  fs.mkdirSync(paths.configProjectsDir, { recursive: true });
+  const outsidePath = path.join(paths.configProjectsDir, 'outside-of-project.json');
+  if (!fs.existsSync(outsidePath)) {
+    const config = {
+      id: 'outside-of-project',
+      name: 'Outside of Project',
+      projectResources: { resources: [] },
+      settings: {
+        fileAccessPolicy: 'AGENT_SETTING_POLICY_ASK',
+        internetPolicy: 'AGENT_SETTING_POLICY_ASK',
+        autoExecutionPolicy: 'CASCADE_COMMANDS_AUTO_EXECUTION_OFF',
+        artifactReviewMode: 'ARTIFACT_REVIEW_MODE_ALWAYS',
+      },
+      isWorkspaceOnly: false,
+    };
+    fs.writeFileSync(outsidePath, JSON.stringify(config, null, 2), 'utf8');
+  }
+}
+
+export function findLocalProjectMatch(
+  projectName: string,
+  gitRemote?: string,
+  workspaceUri?: string
+): { id: string; name: string; folderUri: string } | null {
+  const paths = getAntigravityPaths();
+  if (!fs.existsSync(paths.configProjectsDir)) return null;
+
+  const files = fs.readdirSync(paths.configProjectsDir).filter((f) => f.endsWith('.json') && f !== 'outside-of-project.json');
+  const localProjects: Array<{ id: string; name: string; folderUri: string }> = [];
+
+  for (const f of files) {
+    try {
+      const p = JSON.parse(fs.readFileSync(path.join(paths.configProjectsDir, f), 'utf8'));
+      const folderUri = p.projectResources?.resources?.[0]?.gitFolder?.folderUri || '';
+      localProjects.push({ id: p.id, name: p.name, folderUri });
+    } catch {}
+  }
+
+  const cleanName = (n: string) => n.toLowerCase().trim().replace(/[-_]/g, '');
+
+  // 1. Match by git remote if available
+  if (gitRemote) {
+    for (const lp of localProjects) {
+      if (lp.folderUri) {
+        const localPath = PathResolver.uriToPath(lp.folderUri);
+        const localRemote = PathResolver.getGitRemote(localPath);
+        if (localRemote && (localRemote === gitRemote || localRemote.endsWith(gitRemote) || gitRemote.endsWith(localRemote))) {
+          return lp;
+        }
+      }
+    }
+  }
+
+  // 2. Match by exact folder name or project name
+  for (const lp of localProjects) {
+    if (cleanName(lp.name) === cleanName(projectName)) {
+      return lp;
+    }
+    if (lp.folderUri) {
+      const lpFolderName = path.basename(PathResolver.uriToPath(lp.folderUri));
+      if (cleanName(lpFolderName) === cleanName(projectName)) {
+        return lp;
+      }
+    }
+  }
+
+  // 3. Match substrings (e.g. synchronum vs antigravity-synchronum)
+  for (const lp of localProjects) {
+    const lpn = cleanName(lp.name);
+    const pn = cleanName(projectName);
+    if ((lpn.includes(pn) || pn.includes(lpn)) && lpn.length >= 5 && pn.length >= 5) {
+      return lp;
+    }
+  }
+
+  return null;
+}
+
+export function ensureProjectConfigExists(
+  projectId: string,
+  projectName: string,
+  workspaceUri: string
+): void {
+  if (!projectId || projectId === 'outside-of-project') return;
+
+  const paths = getAntigravityPaths();
+  fs.mkdirSync(paths.configProjectsDir, { recursive: true });
+
+  const projectFilePath = path.join(paths.configProjectsDir, `${projectId}.json`);
+  if (!fs.existsSync(projectFilePath)) {
+    const config = {
+      id: projectId,
+      name: projectName,
+      projectResources: {
+        resources: [
+          {
+            gitFolder: {
+              folderUri: workspaceUri,
+              defaultBranch: 'main',
+            },
+          },
+        ],
+      },
+      settings: {
+        fileAccessPolicy: 'AGENT_SETTING_POLICY_ASK',
+        internetPolicy: 'AGENT_SETTING_POLICY_ASK',
+        autoExecutionPolicy: 'CASCADE_COMMANDS_AUTO_EXECUTION_OFF',
+        artifactReviewMode: 'ARTIFACT_REVIEW_MODE_ALWAYS',
+      },
+      isWorkspaceOnly: false,
+    };
+    fs.writeFileSync(projectFilePath, JSON.stringify(config, null, 2), 'utf8');
+  }
+
+  // Ensure workspace directory exists locally so Antigravity doesn't fail
+  try {
+    const wsPath = PathResolver.uriToPath(workspaceUri);
+    if (wsPath && !fs.existsSync(wsPath)) {
+      fs.mkdirSync(wsPath, { recursive: true });
+    }
+  } catch {}
+
+  // Update projectsOrder in app_storage.json
+  try {
+    if (fs.existsSync(paths.appStoragePath)) {
+      const storage = JSON.parse(fs.readFileSync(paths.appStoragePath, 'utf8'));
+      let order: string[] = [];
+      try {
+        order = JSON.parse(storage.projectsOrder || '[]');
+      } catch {}
+      if (!order.includes(projectId)) {
+        order.push(projectId);
+        storage.projectsOrder = JSON.stringify(order);
+        fs.writeFileSync(paths.appStoragePath, JSON.stringify(storage, null, 2), 'utf8');
+      }
+    }
+  } catch {}
+}
+
+export function ensureConversationLayout(conversationId: string): void {
+  try {
+    const paths = getAntigravityPaths();
+    if (fs.existsSync(paths.appStoragePath)) {
+      const storage = JSON.parse(fs.readFileSync(paths.appStoragePath, 'utf8'));
+      const key = `antigravity-multi-conversation-layout-v3-${conversationId}`;
+      if (!storage[key]) {
+        storage[key] = JSON.stringify({
+          rootNode: {
+            type: 'pane',
+            id: 'pane-1',
+            cascadeId: conversationId,
+          },
+          focusedPaneId: 'pane-1',
+        });
+        fs.writeFileSync(paths.appStoragePath, JSON.stringify(storage, null, 2), 'utf8');
+      }
+    }
+  } catch {}
+}
 
 export function enhanceConversation(s: any): EnhancedConversationSummary {
   const displayTitle = s.preview || s.title || (s.last_modified_time ? `Диалог от ${new Date(s.last_modified_time).toLocaleString('ru-RU')}` : 'Диалог без названия');

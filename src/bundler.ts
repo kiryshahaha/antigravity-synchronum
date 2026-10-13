@@ -5,6 +5,12 @@ import path from 'node:path';
 import { encryptBuffer, decryptBuffer, isEncryptedBuffer } from './crypto.js';
 import { PathResolver } from './path-resolver.js';
 import { getAntigravityPaths } from './paths.js';
+import {
+  ensureConversationLayout,
+  ensureOutsideOfProjectConfigExists,
+  ensureProjectConfigExists,
+  findLocalProjectMatch,
+} from './projects.js';
 import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { BundleManifest, ConversationSummary, ExportOptions, ImportOptions } from './types.js';
@@ -186,28 +192,34 @@ export class SynchronumBundler {
 
     // Match local project_id if the translated workspace uri matches an existing local project
     let targetProjectId = originalSummary.project_id;
+    let finalWorkspaceUris = translatedWorkspaceUris;
+
     try {
       const parsedUris = JSON.parse(translatedWorkspaceUris || '[]');
       if (Array.isArray(parsedUris) && parsedUris.length > 0) {
         const primaryUri = parsedUris[0];
-        const existingProjectMatch = this.sqlite.listSummaries(500).find((s) => {
-          try {
-            const sUris = JSON.parse(s.workspace_uris || '[]');
-            return (
-              Array.isArray(sUris) &&
-              sUris.includes(primaryUri) &&
-              s.project_id &&
-              s.project_id !== 'outside-of-project'
-            );
-          } catch {
-            return false;
+        const wsPath = PathResolver.uriToPath(primaryUri);
+        const projectName = path.basename(wsPath) || manifest.title || 'project';
+
+        // 1. Try to match to an existing local project
+        const match = findLocalProjectMatch(projectName, manifest.git_remote, primaryUri);
+        if (match) {
+          targetProjectId = match.id;
+          if (match.folderUri) {
+            finalWorkspaceUris = JSON.stringify([match.folderUri]);
           }
-        });
-        if (existingProjectMatch && existingProjectMatch.project_id) {
-          targetProjectId = existingProjectMatch.project_id;
+        } else if (targetProjectId && targetProjectId !== 'outside-of-project') {
+          // 2. If no local match, ensure project config exists for targetProjectId
+          ensureProjectConfigExists(targetProjectId, projectName, primaryUri);
         }
       }
     } catch {}
+
+    // Ensure outside-of-project.json exists
+    ensureOutsideOfProjectConfigExists();
+
+    // Ensure layout pane exists for Antigravity
+    ensureConversationLayout(conversationId);
 
     // If targetProjectId changed (e.g. remapped to local project), patch raw_summary protobuf too
     let patchedRawSummary = originalSummary.raw_summary;
@@ -242,7 +254,7 @@ export class SynchronumBundler {
       title: manifest.title || originalSummary.title,
       step_count: manifest.step_count || originalSummary.step_count,
       last_modified_time: manifest.last_modified_time || originalSummary.last_modified_time,
-      workspace_uris: translatedWorkspaceUris,
+      workspace_uris: finalWorkspaceUris,
     };
 
     // Step 4: Upsert into conversation_summaries.db

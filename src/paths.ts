@@ -8,13 +8,15 @@ export interface AntigravityPaths {
   brainDir: string;
   summariesDbPath: string;
   agyhubProtoPath: string;
+  configProjectsDir: string;
+  appStoragePath: string;
 }
 
 export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
   let root = customRoot;
+  const home = os.homedir();
 
   if (!root) {
-    const home = os.homedir();
     root = path.join(home, '.gemini', 'antigravity');
   }
 
@@ -22,6 +24,16 @@ export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
   const conversationsDir = path.join(root, 'conversations');
   const brainDir = path.join(root, 'brain');
   const agyhubProtoPath = path.join(root, 'agyhub_summaries_proto.pb');
+  const configProjectsDir = path.join(home, '.gemini', 'config', 'projects');
+
+  let appStoragePath: string;
+  if (process.platform === 'win32') {
+    appStoragePath = path.join(home, 'AppData', 'Roaming', 'Antigravity', 'app_storage.json');
+  } else if (process.platform === 'darwin') {
+    appStoragePath = path.join(home, 'Library', 'Application Support', 'Antigravity', 'app_storage.json');
+  } else {
+    appStoragePath = path.join(home, '.config', 'Antigravity', 'app_storage.json');
+  }
 
   return {
     root,
@@ -29,6 +41,8 @@ export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
     brainDir,
     summariesDbPath,
     agyhubProtoPath,
+    configProjectsDir,
+    appStoragePath,
   };
 }
 
