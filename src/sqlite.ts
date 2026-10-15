@@ -163,4 +163,22 @@ export class AntigravitySqlite {
       db.close();
     }
   }
+
+  public deleteSummary(conversationId: string): void {
+    if (!fs.existsSync(this.summariesDbPath)) return;
+    const db = new DatabaseSync(this.summariesDbPath);
+    try {
+      db.prepare('DELETE FROM conversation_summaries WHERE conversation_id = ?').run(conversationId);
+      try {
+        db.prepare('DELETE FROM conversations_fts WHERE conversation_id = ?').run(conversationId);
+      } catch {}
+    } finally {
+      db.close();
+    }
+  }
+
+  public checkpoint(): void {
+    this.walCheckpoint(this.summariesDbPath);
+  }
 }
+

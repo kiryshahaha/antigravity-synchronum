@@ -50,9 +50,10 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <div id="device-pill" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-300 text-[11px] font-mono">
+        <div id="device-pill" onclick="promptRenameDevice()" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-300 text-[11px] font-mono cursor-pointer hover:bg-sky-500/20 transition" title="Нажмите, чтобы переименовать устройство">
           <span>💻</span>
-          <span id="current-device-name">Laptop-Work</span>
+          <span id="current-device-name">Device</span>
+          <span class="text-[10px] opacity-60">✏️</span>
         </div>
         <div id="status-badge" class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] font-medium">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -78,6 +79,9 @@
       <div class="flex items-center gap-2">
         <button onclick="toggleService()" id="btn-service" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs whitespace-nowrap shadow-sm">
           Включить автозапуск
+        </button>
+        <button onclick="flushNow()" id="btn-flush" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs flex items-center gap-1 shadow-sm" title="Сбросить все текущие изменения на Google Диск">
+          <span>💾</span> Сбросить (Flush)
         </button>
         <button onclick="pullStorage()" id="btn-pull" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-3 py-1.5 rounded-lg border border-slate-700 transition text-xs flex items-center gap-1 shadow-sm" title="Подтянуть обновления с Google Диска">
           <span>⬇️</span> Подтянуть (Pull)
@@ -461,6 +465,70 @@
       window.open(`/api/export/${id}${masterPassword ? `?password=${encodeURIComponent(masterPassword)}` : ''}`, '_blank');
     }
 
+    async function promptRenameDevice() {
+      const current = document.getElementById('current-device-name').innerText;
+      const newName = prompt('Введите новое имя для этого устройства:', current);
+      if (newName && newName.trim() && newName.trim() !== current) {
+        try {
+          const res = await fetch('/api/device/rename', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('Устройство переименовано: ' + data.deviceName);
+            checkStatus();
+          } else {
+            showToast('Ошибка: ' + data.error, 'error');
+          }
+        } catch {
+          showToast('Ошибка сети', 'error');
+        }
+      }
+    }
+
+    async function flushNow() {
+      showToast('Сброс всех изменений на диск...');
+      try {
+        const res = await fetch('/api/flush', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Все изменения отправлены в хранилище!');
+          checkStatus();
+          loadDevices();
+        } else {
+          showToast('Ошибка: ' + (data.error || 'Сбой сброса'), 'error');
+        }
+      } catch {
+        showToast('Ошибка сети', 'error');
+      }
+    }
+
+    async function deleteSessionEverywhere(id, title) {
+      if (!confirm(`Удалить диалог "${title}" отовсюду?\n\nОн будет удален локально и с Google Диска (будет создан tombstone, предотвращающий повторное появление).`)) {
+        return;
+      }
+      showToast('Удаление диалога...');
+      try {
+        const res = await fetch('/api/conversations/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: id })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Диалог удален отовсюду!');
+          loadGroupedData();
+          checkStatus();
+        } else {
+          showToast('Ошибка удаления: ' + (data.error || 'Сбой'), 'error');
+        }
+      } catch {
+        showToast('Ошибка сети при удалении', 'error');
+      }
+    }
+
     async function loadGroupedData() {
       try {
         const res = await fetch('/api/grouped-conversations?limit=300');
@@ -611,6 +679,9 @@
             </button>
             <button onclick="pushSession('${s.conversation_id}')" title="Выгрузить в папку устройства на Google Диске" class="bg-sky-600/90 hover:bg-sky-500 text-white font-medium px-2.5 py-1 rounded-md transition flex items-center gap-1 text-[10px] shadow-sm">
               <span>☁️</span> Push
+            </button>
+            <button onclick="deleteSessionEverywhere('${s.conversation_id}', '${cleanTitle.replace(/'/g, "\\'")}')" title="Удалить диалог отовсюду" class="bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 font-medium px-2 py-1 rounded-md border border-rose-900/50 transition flex items-center gap-1 text-[10px]">
+              <span>🗑️</span>
             </button>
           </div>
         </div>

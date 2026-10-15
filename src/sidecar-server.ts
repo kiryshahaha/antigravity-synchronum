@@ -10,7 +10,7 @@ try {
 } catch {}
 
 import { SynchronumBundler } from './bundler.js';
-import { loadConfig, saveConfig, SynchronumConfig } from './config.js';
+import { loadConfig, renameDevice, saveConfig, SynchronumConfig } from './config.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
 import { getGroupedConversations, repairAndReconcileAll } from './projects.js';
@@ -18,12 +18,13 @@ import { installService, isServiceInstalled, uninstallService } from './service.
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, SyncStorageProvider } from './storage.js';
 import { SynchronumSyncEngine } from './sync.js';
+import { SynchronumWatcher } from './watcher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-const PORT = parseInt(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT || '42125', 10);
+const PORT = parseInt(process.env.PORT || process.env.ANTIGRAVITY_SIDECAR_WEB_PORT || '42125', 10);
 const paths = getAntigravityPaths();
 const sqlite = new AntigravitySqlite(paths.summariesDbPath);
 const bundler = new SynchronumBundler();
@@ -31,6 +32,7 @@ const oauth = new GoogleDriveOAuth();
 
 let currentConfig: SynchronumConfig = loadConfig();
 let currentStorage: SyncStorageProvider = createStorageProvider(currentConfig, oauth);
+let watcher: SynchronumWatcher | null = null;
 
 function getSyncEngine(): SynchronumSyncEngine {
   currentConfig = loadConfig();
@@ -73,13 +75,18 @@ async function runAutoSyncCycle(): Promise<void> {
 // Run auto-sync check every 30 seconds
 setInterval(runAutoSyncCycle, 30000);
 
-// Run initial sync cycle and reconciliation on startup
+// Run initial sync cycle, start watcher, and run reconciliation on startup
 setTimeout(() => {
   try {
     repairAndReconcileAll();
   } catch {}
   const cfg = loadConfig();
   if (cfg.masterPassword) {
+    if (!watcher) {
+      const engine = getSyncEngine();
+      watcher = new SynchronumWatcher(engine);
+      watcher.start({ debounceMs: 3000, pollIntervalMs: 10000 });
+    }
     runAutoSyncCycle().catch(() => {});
   }
 }, 2000);
@@ -273,6 +280,60 @@ const server = http.createServer(async (req, res) => {
       const stats = repairAndReconcileAll();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, stats }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 4.2 Rename Device API
+  if (url.pathname === '/api/device/rename' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const updated = renameDevice(body.name);
+      currentConfig = updated;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deviceName: updated.deviceName }));
+    } catch (err: any) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 4.3 Delete Conversation Everywhere (Tombstone) API
+  if (url.pathname === '/api/conversations/delete' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const conversationId = body.conversationId;
+      if (!conversationId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'conversationId обязателен' }));
+        return;
+      }
+      const engine = getSyncEngine();
+      const cfg = loadConfig();
+      const result = await engine.deleteSession(conversationId, cfg.masterPassword);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, result }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 4.4 Flush All Changes API
+  if (url.pathname === '/api/flush' && req.method === 'POST') {
+    try {
+      if (watcher) {
+        await watcher.flushImmediately();
+      } else {
+        await runAutoSyncCycle();
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
     } catch (err: any) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));

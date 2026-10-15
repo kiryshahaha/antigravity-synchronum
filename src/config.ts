@@ -12,6 +12,7 @@ export interface SynchronumConfig {
   masterPassword?: string;
   deviceId?: string;
   deviceName?: string;
+  tombstones?: Record<string, any>;
 }
 
 const CONFIG_FILE_PATH = path.join(os.homedir(), '.gemini', 'antigravity', 'synchronum_config.json');
@@ -41,10 +42,14 @@ export function getDefaultLocalFolderPath(): string {
 }
 
 export function getDefaultDeviceName(): string {
-  const host = os.hostname().toLowerCase();
-  if (host.includes('laptop')) return 'Laptop-Work';
-  if (host.includes('desktop') || host.includes('pc')) return 'Home-PC';
   return os.hostname();
+}
+
+export function renameDevice(newName: string): SynchronumConfig {
+  if (!newName || !newName.trim()) {
+    throw new Error('Имя устройства не может быть пустым');
+  }
+  return saveConfig({ deviceName: newName.trim() });
 }
 
 export function getDefaultConfig(): SynchronumConfig {

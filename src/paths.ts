@@ -8,6 +8,7 @@ export interface AntigravityPaths {
   brainDir: string;
   summariesDbPath: string;
   agyhubProtoPath: string;
+  annotationsDir: string;
   configProjectsDir: string;
   appStoragePath: string;
 }
@@ -23,6 +24,7 @@ export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
   const summariesDbPath = path.join(root, 'conversation_summaries.db');
   const conversationsDir = path.join(root, 'conversations');
   const brainDir = path.join(root, 'brain');
+  const annotationsDir = path.join(root, 'annotations');
   const agyhubProtoPath = path.join(root, 'agyhub_summaries_proto.pb');
   const configProjectsDir = path.join(home, '.gemini', 'config', 'projects');
 
@@ -39,6 +41,7 @@ export function getAntigravityPaths(customRoot?: string): AntigravityPaths {
     root,
     conversationsDir,
     brainDir,
+    annotationsDir,
     summariesDbPath,
     agyhubProtoPath,
     configProjectsDir,

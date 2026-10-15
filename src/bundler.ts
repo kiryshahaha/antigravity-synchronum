@@ -2,9 +2,11 @@ import AdmZip from 'adm-zip';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { encryptBuffer, decryptBuffer, isEncryptedBuffer } from './crypto.js';
 import { PathResolver } from './path-resolver.js';
 import { getAntigravityPaths } from './paths.js';
+import { buildUriReplacements, patchProtoTree } from './proto-patcher.js';
 import {
   ensureConversationLayout,
   ensureOutsideOfProjectConfigExists,
@@ -88,6 +90,12 @@ export class SynchronumBundler {
     const brainConvoDir = path.join(this.paths.brainDir, conversationId);
     if (options.includeBrain !== false && fs.existsSync(brainConvoDir)) {
       zip.addLocalFolder(brainConvoDir, 'brain');
+    }
+
+    // Add annotation file if exists (for pinned status)
+    const annotationPath = path.join(this.paths.annotationsDir, `${conversationId}.pbtxt`);
+    if (fs.existsSync(annotationPath)) {
+      zip.addLocalFile(annotationPath, '', 'annotation.pbtxt');
     }
 
     let buffer = zip.toBuffer();
@@ -177,6 +185,15 @@ export class SynchronumBundler {
       }
     }
 
+    // Step 2.1: Restore annotations (pinned status)
+    const annotationEntry = zip.getEntry('annotation.pbtxt');
+    if (annotationEntry) {
+      fs.mkdirSync(this.paths.annotationsDir, { recursive: true });
+      const targetAnnotationPath = path.join(this.paths.annotationsDir, `${conversationId}.pbtxt`);
+      fs.writeFileSync(targetAnnotationPath, annotationEntry.getData());
+      filesRestored++;
+    }
+
     // Step 3: Translate workspace URIs
     const summaries = this.sqlite.listSummaries(100);
     const knownUris = summaries.map((s) => s.workspace_uris);
@@ -222,9 +239,50 @@ export class SynchronumBundler {
     // Ensure layout pane exists for Antigravity
     ensureConversationLayout(conversationId);
 
-    // If targetProjectId changed (e.g. remapped to local project), patch raw_summary protobuf too
+    // Extract primary URIs for Protobuf tree replacements
+    let origPrimaryUri = '';
+    try {
+      const origUris = JSON.parse(originalSummary.workspace_uris || '[]');
+      if (Array.isArray(origUris) && origUris.length > 0) origPrimaryUri = origUris[0];
+    } catch {}
+
+    let targetPrimaryUri = '';
+    try {
+      const targetUris = JSON.parse(finalWorkspaceUris || '[]');
+      if (Array.isArray(targetUris) && targetUris.length > 0) targetPrimaryUri = targetUris[0];
+    } catch {}
+
+    const protoReplacements: [string, string][] = [];
+    if (origPrimaryUri && targetPrimaryUri && origPrimaryUri !== targetPrimaryUri) {
+      protoReplacements.push(...buildUriReplacements(origPrimaryUri, targetPrimaryUri));
+    }
+    if (originalSummary.project_id && targetProjectId && originalSummary.project_id !== targetProjectId) {
+      protoReplacements.push([originalSummary.project_id, targetProjectId]);
+    }
+
+    // Step 3.1: Patch trajectory_metadata_blob in conversation.db
+    if (convoDbEntry && protoReplacements.length > 0) {
+      const targetDbPath = path.join(this.paths.conversationsDir, `${conversationId}.db`);
+      if (fs.existsSync(targetDbPath)) {
+        try {
+          const convoDb = new DatabaseSync(targetDbPath);
+          const blobRow: any = convoDb.prepare("SELECT data FROM trajectory_metadata_blob WHERE id = 'main'").get();
+          if (blobRow && blobRow.data) {
+            const patchedBlob = patchProtoTree(Buffer.from(blobRow.data), protoReplacements);
+            if (!patchedBlob.equals(Buffer.from(blobRow.data))) {
+              convoDb.prepare("UPDATE trajectory_metadata_blob SET data = ? WHERE id = 'main'").run(patchedBlob);
+            }
+          }
+          convoDb.close();
+        } catch (err: any) {
+          console.warn('[Trajectory Patch Warning]', err.message);
+        }
+      }
+    }
+
+    // Step 3.2: Patch raw_summary protobuf for conversation_summaries.db
     let patchedRawSummary = originalSummary.raw_summary;
-    if (patchedRawSummary && originalSummary.project_id && targetProjectId !== originalSummary.project_id) {
+    if (patchedRawSummary && protoReplacements.length > 0) {
       try {
         let rawBuf: Buffer;
         if (Buffer.isBuffer(patchedRawSummary)) rawBuf = patchedRawSummary;
@@ -235,13 +293,7 @@ export class SynchronumBundler {
         } else {
           rawBuf = Buffer.from(patchedRawSummary as any);
         }
-
-        const oldId = originalSummary.project_id;
-        const newId = targetProjectId;
-        if (oldId.length === 36 && newId.length === 36 && rawBuf.includes(oldId)) {
-          const str = rawBuf.toString('binary').replaceAll(oldId, newId);
-          patchedRawSummary = Buffer.from(str, 'binary');
-        }
+        patchedRawSummary = patchProtoTree(rawBuf, protoReplacements);
       } catch (err: any) {
         console.warn('[Raw Summary Patch Warning]', err.message);
       }

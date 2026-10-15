@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
-import { loadConfig, saveConfig } from './config.js';
+import { loadConfig, renameDevice, saveConfig } from './config.js';
 import { isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths, validateAntigravityPaths } from './paths.js';
@@ -11,6 +11,7 @@ import { installService, isServiceInstalled, isServiceRunning, startService, sto
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, LocalFolderStorageProvider } from './storage.js';
 import { SynchronumSyncEngine } from './sync.js';
+import { SynchronumWatcher } from './watcher.js';
 
 const program = new Command();
 
@@ -235,6 +236,34 @@ program
   });
 
 program
+  .command('sync')
+  .description('Two-way safe synchronization: push local changes and pull remote updates')
+  .requiredOption('-p, --password <password>', 'Master password for E2EE sync')
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      saveConfig({ masterPassword: options.password });
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Running two-way safe sync via ${storage.name}...`);
+
+      const result = await engine.syncAll(options.password);
+      console.log(`\n✅ Sync completed!`);
+      console.log(`   Pushed (${result.pushed.length}):   ${result.pushed.join(', ') || 'None'}`);
+      console.log(`   Restored (${result.restored.length}): ${result.restored.join(', ') || 'None'}`);
+      console.log(`   Up-to-date (${result.skipped.length}): ${result.skipped.join(', ') || 'None'}\n`);
+
+      console.log(`🔄 Reconciling Antigravity projects and binary protobuf...`);
+      const rep = repairAndReconcileAll();
+      console.log(`✅ Antigravity environment updated: ${rep.totalProjects} projects registered, ${rep.protoSynced} dialogues ready in IDE!\n`);
+    } catch (err: any) {
+      console.error(`\n❌ Sync failed: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('repair')
   .description('Automatically repair Antigravity projects registry, layouts, and binary protobuf cache')
   .action(() => {
@@ -381,6 +410,93 @@ program
     console.log(`Interval (minutes): ${saved.autoSyncIntervalMinutes}`);
     console.log(`Last Sync Time:     ${saved.lastSyncTime || '(none)'}`);
     console.log(`Autostart Service:  ${saved.autostartService ? '🟢 Enabled' : '⚪ Disabled'}\n`);
+  });
+
+const deviceCmd = program.command('device').description('Manage device settings and naming');
+
+deviceCmd
+  .command('rename <newName>')
+  .description('Rename this device for cloud identification')
+  .action((newName) => {
+    try {
+      const updated = renameDevice(newName);
+      console.log(`\n✅ Устройство успешно переименовано: "${updated.deviceName}"\n`);
+    } catch (err: any) {
+      console.error(`\n❌ Ошибка: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('delete <conversationId>')
+  .description('Delete a conversation everywhere (locally and from cloud storage with tombstone)')
+  .option('-p, --password <password>', 'Master password for cloud authorization')
+  .action(async (conversationId, options) => {
+    try {
+      const config = loadConfig();
+      const password = options.password || config.masterPassword;
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+
+      console.log(`\n🗑️ Удаление диалога: ${conversationId}...`);
+      const result = await engine.deleteSession(conversationId, password);
+      console.log(`✅ Диалог "${result.title}" успешно удален отовсюду.`);
+      console.log('   Создан tombstone — диалог не будет восстанавливаться с других устройств.\n');
+    } catch (err: any) {
+      console.error(`\n❌ Ошибка удаления: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('watch')
+  .description('Run autonomous file watcher & remote poller daemon directly')
+  .option('-p, --password <password>', 'Master password for E2EE sync')
+  .action(async (options) => {
+    const config = loadConfig();
+    const password = options.password || config.masterPassword;
+    if (!password) {
+      console.error('\n❌ Master password is required for automatic sync. Run: synchronum sync -p <password> first or provide -p\n');
+      process.exit(1);
+    }
+    if (options.password) {
+      saveConfig({ masterPassword: options.password });
+    }
+
+    const oauth = new GoogleDriveOAuth();
+    const storage = createStorageProvider(config, oauth);
+    const engine = new SynchronumSyncEngine(storage);
+    const watcher = new SynchronumWatcher(engine);
+
+    console.log('\n🚀 Starting Synchronum Autonomous Daemon...');
+    console.log(`   Device Name: ${engine.getDeviceName()} (${engine.getDeviceId()})`);
+    console.log(`   Storage:     ${storage.getDisplayName()}`);
+    console.log('   Press Ctrl+C to stop and flush.\n');
+
+    watcher.start({ debounceMs: 3000, pollIntervalMs: 10000 });
+  });
+
+program
+  .command('flush')
+  .description('Flush and sync all local changes to cloud storage immediately')
+  .action(async () => {
+    try {
+      const config = loadConfig();
+      if (!config.masterPassword) {
+        console.error('\n❌ Мастер-пароль не задан. Укажите его через: synchronum sync -p <password>\n');
+        process.exit(1);
+      }
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      const watcher = new SynchronumWatcher(engine);
+      await watcher.flushImmediately();
+      console.log('✅ Все изменения успешно отправлены в хранилище.\n');
+    } catch (err: any) {
+      console.error(`\n❌ Ошибка сброса: ${err.message}\n`);
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);

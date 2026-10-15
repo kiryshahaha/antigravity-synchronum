@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
-import { getDefaultDeviceId, loadConfig } from './config.js';
+import { TombstoneEntry, TombstoneManager } from './tombstones.js';
+import { getDefaultDeviceId, getDefaultDeviceName, loadConfig } from './config.js';
 import { decryptBuffer, encryptBuffer, isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
@@ -30,6 +31,7 @@ export interface RemoteIndex {
   device_id: string;
   device_name: string;
   sessions: Record<string, RemoteSessionEntry>;
+  tombstones?: Record<string, TombstoneEntry>;
 }
 
 export interface SyncCycleResult {
@@ -45,6 +47,7 @@ export class SynchronumSyncEngine {
   private storage: SyncStorageProvider;
   private bundler: SynchronumBundler;
   private sqlite: AntigravitySqlite;
+  private tombstones = new TombstoneManager();
   private paths = getAntigravityPaths();
 
   constructor(providerOrOAuth: SyncStorageProvider | GoogleDriveOAuth) {
@@ -64,7 +67,7 @@ export class SynchronumSyncEngine {
 
   public getDeviceName(): string {
     const config = loadConfig();
-    return config.deviceName || 'Laptop-Work';
+    return config.deviceName || getDefaultDeviceName();
   }
 
   public getStorageProvider(): SyncStorageProvider {
@@ -129,6 +132,7 @@ export class SynchronumSyncEngine {
         device_id: parsed.device_id || deviceId,
         device_name: parsed.device_name || deviceId,
         sessions: parsed.sessions || {},
+        tombstones: parsed.tombstones || {},
       };
     } catch {
       throw new Error('Поврежденный файл индекса устройства.');
@@ -139,6 +143,7 @@ export class SynchronumSyncEngine {
     index.updated_at = new Date().toISOString();
     index.device_id = deviceId;
     index.device_name = this.getDeviceName();
+    index.tombstones = this.tombstones.getLocalTombstones();
 
     const jsonBuffer = Buffer.from(JSON.stringify(index, null, 2), 'utf-8');
     const encrypted = encryptBuffer(jsonBuffer, password);
@@ -274,6 +279,12 @@ export class SynchronumSyncEngine {
     const myIndex = await this.fetchDeviceIndex(myId, password);
 
     for (const local of localSummaries) {
+      // Check if session was deleted via tombstone
+      if (this.tombstones.isDeleted(local.conversation_id)) {
+        this.tombstones.purgeLocalConversation(local.conversation_id);
+        continue;
+      }
+
       const entry = myIndex.sessions[local.conversation_id];
       const localMod = new Date(local.last_modified_time || 0).getTime();
       const remoteMod = entry ? new Date(entry.last_modified_time || 0).getTime() : 0;
@@ -307,7 +318,22 @@ export class SynchronumSyncEngine {
         continue;
       }
 
+      // Merge remote tombstones
+      if (otherIndex.tombstones) {
+        this.tombstones.mergeRemoteTombstones(otherIndex.tombstones);
+      }
+
       for (const [id, remoteEntry] of Object.entries(otherIndex.sessions)) {
+        // Skip and purge if marked as deleted by a tombstone
+        if (this.tombstones.isDeleted(id, remoteEntry.last_modified_time)) {
+          if (localMap.has(id)) {
+            this.tombstones.purgeLocalConversation(id);
+            localMap.delete(id);
+          }
+          skipped.push(remoteEntry.title || id);
+          continue;
+        }
+
         const local = localMap.get(id);
 
         if (local) {
@@ -357,6 +383,27 @@ export class SynchronumSyncEngine {
       skipped,
       devices,
     };
+  }
+
+  public async deleteSession(
+    conversationId: string,
+    password?: string
+  ): Promise<{ success: boolean; conversationId: string; title: string }> {
+    const myId = this.getDeviceId();
+    const result = await this.tombstones.deleteEverywhere(conversationId, this.storage, myId);
+
+    // Update own index on storage if password available
+    if (password) {
+      try {
+        const index = await this.fetchDeviceIndex(myId, password);
+        delete index.sessions[conversationId];
+        await this.saveDeviceIndex(myId, index, password);
+      } catch (err: any) {
+        console.warn('[Delete Remote Index Warning]', err.message);
+      }
+    }
+
+    return result;
   }
 
   // Alias for backward compatibility

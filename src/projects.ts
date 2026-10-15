@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { getAntigravityPaths } from './paths.js';
 import { PathResolver } from './path-resolver.js';
+import { buildUriReplacements, patchProtoTree } from './proto-patcher.js';
 import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { EnhancedConversationSummary, ProjectGroup } from './types.js';
@@ -405,16 +407,45 @@ export function repairAndReconcileAll(): {
 
     if (canonical && canonical.id !== row.project_id) {
       // Remap to canonical local project!
-      let patchedRaw = row.raw_summary;
-      if (patchedRaw) {
-        const rawBuf = Buffer.isBuffer(patchedRaw) ? patchedRaw : Buffer.from(patchedRaw);
-        const oldId = row.project_id;
-        const newId = canonical.id;
-        if (rawBuf.includes(oldId)) {
-          const str = rawBuf.toString('binary').replaceAll(oldId, newId);
-          patchedRaw = Buffer.from(str, 'binary');
+      const protoReplacements: [string, string][] = [];
+      if (primaryUri && canonical.folderUri && primaryUri !== canonical.folderUri) {
+        protoReplacements.push(...buildUriReplacements(primaryUri, canonical.folderUri));
+      }
+      if (row.project_id && canonical.id && row.project_id !== canonical.id) {
+        protoReplacements.push([row.project_id, canonical.id]);
+      }
+
+      // Patch trajectory_metadata_blob inside conversations/<id>.db
+      if (protoReplacements.length > 0) {
+        const convoDbPath = path.join(paths.conversationsDir, `${row.conversation_id}.db`);
+        if (fs.existsSync(convoDbPath)) {
+          try {
+            const convoDb = new DatabaseSync(convoDbPath);
+            const blobRow: any = convoDb.prepare("SELECT data FROM trajectory_metadata_blob WHERE id = 'main'").get();
+            if (blobRow && blobRow.data) {
+              const patchedBlob = patchProtoTree(Buffer.from(blobRow.data), protoReplacements);
+              if (!patchedBlob.equals(Buffer.from(blobRow.data))) {
+                convoDb.prepare("UPDATE trajectory_metadata_blob SET data = ? WHERE id = 'main'").run(patchedBlob);
+              }
+            }
+            convoDb.close();
+          } catch (err: any) {
+            console.warn(`[Repair Trajectory Patch Warning] ${row.conversation_id}:`, err.message);
+          }
         }
       }
+
+      // Patch raw_summary BLOB
+      let patchedRaw = row.raw_summary;
+      if (patchedRaw && protoReplacements.length > 0) {
+        try {
+          const rawBuf = Buffer.isBuffer(patchedRaw) ? patchedRaw : Buffer.from(patchedRaw);
+          patchedRaw = patchProtoTree(rawBuf, protoReplacements);
+        } catch (err: any) {
+          console.warn(`[Repair Raw Summary Patch Warning] ${row.conversation_id}:`, err.message);
+        }
+      }
+
       const newUris = JSON.stringify([canonical.folderUri || primaryUri]);
       sqlite.upsertSummary({
         ...row,
