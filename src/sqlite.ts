@@ -164,14 +164,18 @@ export class AntigravitySqlite {
     }
   }
 
-  public deleteSummary(conversationId: string): void {
-    if (!fs.existsSync(this.summariesDbPath)) return;
+  public deleteSummary(conversationId: string): boolean {
+    if (!fs.existsSync(this.summariesDbPath)) return false;
     const db = new DatabaseSync(this.summariesDbPath);
     try {
-      db.prepare('DELETE FROM conversation_summaries WHERE conversation_id = ?').run(conversationId);
+      db.exec('PRAGMA journal_mode = WAL;');
+      db.exec('PRAGMA busy_timeout = 5000;');
+      const stmt = db.prepare('DELETE FROM conversation_summaries WHERE conversation_id = ?');
+      const result = stmt.run(conversationId) as any;
       try {
         db.prepare('DELETE FROM conversations_fts WHERE conversation_id = ?').run(conversationId);
       } catch {}
+      return Boolean(result && result.changes && result.changes > 0);
     } finally {
       db.close();
     }
@@ -179,6 +183,45 @@ export class AntigravitySqlite {
 
   public checkpoint(): void {
     this.walCheckpoint(this.summariesDbPath);
+  }
+
+  public deleteConversationFiles(conversationId: string, customAntigravityRoot?: string): void {
+    const root = customAntigravityRoot || path.dirname(this.summariesDbPath);
+    const convoDb = path.join(root, 'conversations', `${conversationId}.db`);
+    const convoDbWal = path.join(root, 'conversations', `${conversationId}.db-wal`);
+    const convoDbShm = path.join(root, 'conversations', `${conversationId}.db-shm`);
+    const convoPb = path.join(root, 'conversations', `${conversationId}.pb`);
+    const brainDir = path.join(root, 'brain', conversationId);
+
+    const removeFileSafe = (p: string) => {
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch {}
+    };
+
+    removeFileSafe(convoDb);
+    removeFileSafe(convoDbWal);
+    removeFileSafe(convoDbShm);
+    removeFileSafe(convoPb);
+
+    try {
+      if (fs.existsSync(brainDir)) {
+        fs.rmSync(brainDir, { recursive: true, force: true });
+      }
+    } catch {}
+
+    // Clean layout key in app_storage.json
+    try {
+      const appStorage = path.join(root, '..', 'app_storage.json');
+      if (fs.existsSync(appStorage)) {
+        const storage = JSON.parse(fs.readFileSync(appStorage, 'utf8'));
+        const layoutKey = `antigravity-multi-conversation-layout-v3-${conversationId}`;
+        if (storage[layoutKey]) {
+          delete storage[layoutKey];
+          fs.writeFileSync(appStorage, JSON.stringify(storage, null, 2), 'utf8');
+        }
+      }
+    } catch {}
   }
 }
 

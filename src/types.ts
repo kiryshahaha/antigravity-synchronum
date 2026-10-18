@@ -74,4 +74,40 @@ export interface ProjectGroup {
   gitStatus: 'git_tracked' | 'local_only' | 'no_workspace';
   lastModifiedTime: string;
   sessions: EnhancedConversationSummary[];
+  workspaceHash?: string;
+  workspaceFileCount?: number;
+  workspaceSizeBytes?: number;
+  workspaceSynced?: boolean;
 }
+
+export interface WorkspaceMeta {
+  project_id: string;
+  project_name: string;
+  workspace_hash: string;
+  file_count: number;
+  total_bytes: number;
+  last_modified_time: string;
+  author_device: string;
+}
+
+export interface RemoteWorkspaceEntry {
+  project_id: string;
+  project_name: string;
+  workspace_hash: string;
+  file_name: string;
+  file_id: string;
+  size_bytes: number;
+  file_count: number;
+  updated_at: string;
+  author_device: string;
+  deleted?: boolean;
+  deleted_at?: string;
+}
+
+export interface SessionTombstone {
+  conversation_id: string;
+  deleted_at: string;
+  title?: string;
+  author_device?: string;
+}
+

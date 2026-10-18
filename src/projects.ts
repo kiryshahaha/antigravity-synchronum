@@ -8,6 +8,7 @@ import { buildUriReplacements, patchProtoTree } from './proto-patcher.js';
 import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { EnhancedConversationSummary, ProjectGroup } from './types.js';
+import { WorkspaceManager } from './workspace.js';
 
 export function ensureOutsideOfProjectConfigExists(): void {
   const paths = getAntigravityPaths();
@@ -326,6 +327,19 @@ export function getGroupedConversations(sqlite: AntigravitySqlite, limit = 100):
       const groupKey = enhanced.project_name;
 
       if (!projectsMap.has(groupKey)) {
+        let wsHash: string | undefined;
+        let wsCount: number | undefined;
+        let wsSize: number | undefined;
+
+        if (enhanced.git_status === 'local_only' && wsPath && fs.existsSync(wsPath)) {
+          try {
+            const scan = WorkspaceManager.scanWorkspace(wsPath);
+            wsHash = scan.hash;
+            wsCount = scan.fileCount;
+            wsSize = scan.totalBytes;
+          } catch {}
+        }
+
         projectsMap.set(groupKey, {
           id: raw.project_id,
           name: enhanced.project_name,
@@ -335,8 +349,12 @@ export function getGroupedConversations(sqlite: AntigravitySqlite, limit = 100):
           gitStatus: enhanced.git_status,
           lastModifiedTime: raw.last_modified_time,
           sessions: [],
+          workspaceHash: wsHash,
+          workspaceFileCount: wsCount,
+          workspaceSizeBytes: wsSize,
         });
       }
+
 
       const group = projectsMap.get(groupKey)!;
       group.sessions.push(enhanced);

@@ -591,7 +591,15 @@
             const safeId = 'proj_' + p.name.replace(/[^a-zA-Z0-9_-]/g, '_');
             const gitBadge = p.gitStatus === 'git_tracked' 
               ? `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-mono truncate max-w-[200px]" title="${p.gitRemote}">🟢 Git: ${p.gitRemote ? p.gitRemote.split('/').pop().replace('.git', '') : 'Connected'}</span>`
-              : `<span class="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[10px]">⚪ Локальный проект</span>`;
+              : `<span class="bg-slate-800 text-slate-400 border border-slate-700 px-2 py-0.5 rounded text-[10px]">⚪ Без Git</span>`;
+
+            const wsSyncBadge = p.gitStatus === 'local_only' && p.workspaceHash
+              ? `<span class="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded text-[10px] font-mono" title="${p.workspaceFileCount || 0} файлов (${((p.workspaceSizeBytes || 0) / 1024).toFixed(1)} KB)">📦 Код: ${p.workspaceHash}</span>`
+              : '';
+
+            const wsSyncBtn = p.gitStatus === 'local_only'
+              ? `<button onclick="syncWorkspace('${p.id}', event)" title="Упаковать и выгрузить код проекта на диск" class="text-indigo-300 hover:text-white bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-800/80 px-2 py-1 rounded-lg text-[10px] flex items-center gap-1 transition"><span>📦</span> Выгрузить код</button>`
+              : '';
 
             const sessionsHtml = p.sessions.map(s => renderSessionRow(s)).join('');
 
@@ -604,12 +612,14 @@
                       <div class="flex items-center gap-2 mb-0.5 flex-wrap">
                         <span class="font-bold text-slate-100 text-xs">${p.name}</span>
                         ${gitBadge}
+                        ${wsSyncBadge}
                         <span class="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.2 rounded font-mono">${p.sessions.length} диалогов</span>
                       </div>
                       <div class="text-[10px] font-mono text-slate-500 truncate" title="${p.workspacePath}">${p.workspacePath}</div>
                     </div>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
+                    ${wsSyncBtn}
                     <button class="text-slate-400 hover:text-slate-200 transition text-xs px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg flex items-center gap-1">
                       <span>Диалоги</span>
                       <span id="chevron-${safeId}" class="text-[10px]">▼</span>
@@ -674,6 +684,9 @@
             </div>
           </div>
           <div class="flex items-center gap-1.5 shrink-0">
+            <button onclick="deleteSession('${s.conversation_id}', event)" title="Удалить диалог навсегда (ставит tombstone для всех устройств)" class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-medium px-2 py-1 rounded-md transition flex items-center gap-1 text-[10px]">
+              <span>🗑️</span>
+            </button>
             <button onclick="exportSession('${s.conversation_id}')" title="Скачать зашифрованный бандл" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-2 py-1 rounded-md border border-slate-700 transition flex items-center gap-1 text-[10px]">
               <span>📦</span>
             </button>
@@ -688,7 +701,55 @@
       `;
     }
 
+    async function deleteSession(conversationId, e) {
+      if (e) e.stopPropagation();
+      if (!confirm('Вы уверены, что хотите удалить этот диалог? Он будет удалён локально и помечен как удалённый (deleted) для всех синхронизируемых устройств.')) {
+        return;
+      }
+      showToast('Удаление диалога...');
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}/delete`, {
+          method: 'POST'
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Диалог удален и помечен флагом deleted!');
+          loadGroupedData();
+        } else {
+          showToast('Ошибка удаления: ' + (data.error || 'Не удалось удалить'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при удалении', 'error');
+      }
+    }
+
+    async function syncWorkspace(projectId, e) {
+      if (e) e.stopPropagation();
+      if (!masterPassword) {
+        showToast('Задайте мастер-пароль для шифрования кода проекта!', 'error');
+        return;
+      }
+      showToast('Упаковка и шифрование кода проекта...');
+      try {
+        const res = await fetch(`/api/workspaces/sync/${projectId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: masterPassword })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(`Воркспейс выгружен! Хэш: ${data.result.hash}`);
+          loadGroupedData();
+        } else {
+          showToast('Ошибка выгрузки: ' + (data.error || 'Ошибка воркспейса'), 'error');
+        }
+      } catch (err) {
+        showToast('Ошибка сети при выгрузке воркспейса', 'error');
+      }
+    }
+
     function toggleCollapse(id) {
+
       const el = document.getElementById(id);
       const chevron = document.getElementById(`chevron-${id}`);
       if (el) {

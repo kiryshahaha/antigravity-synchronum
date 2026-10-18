@@ -14,6 +14,7 @@ import { loadConfig, renameDevice, saveConfig, SynchronumConfig } from './config
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths } from './paths.js';
 import { getGroupedConversations, repairAndReconcileAll } from './projects.js';
+import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { installService, isServiceInstalled, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, SyncStorageProvider } from './storage.js';
@@ -59,7 +60,9 @@ async function runAutoSyncCycle(): Promise<void> {
 
     const result = await engine.syncAll(config.masterPassword);
     saveConfig({ lastSyncTime: new Date().toISOString() });
-    console.log(`[Auto-Sync] Completed: Pushed ${result.pushed.length}, Restored ${result.restored.length}, Skipped ${result.skipped.length}`);
+    console.log(
+      `[Auto-Sync] Completed: Pushed ${result.pushed.length} sessions, ${result.pushedWorkspaces?.length || 0} workspaces; Restored ${result.restored.length} sessions, ${result.restoredWorkspaces?.length || 0} workspaces; Skipped ${result.skipped.length}`
+    );
 
     // Auto-reconcile Antigravity project registry and proto cache
     try {
@@ -71,6 +74,33 @@ async function runAutoSyncCycle(): Promise<void> {
     isSyncing = false;
   }
 }
+
+let hookDebounceTimer: NodeJS.Timeout | null = null;
+export function triggerDebouncedHookSync(delayMs = 15000): void {
+  if (hookDebounceTimer) {
+    clearTimeout(hookDebounceTimer);
+  }
+  console.log(`[Hook Stop] Received session Stop event. Debouncing sync for ${delayMs / 1000}s...`);
+  hookDebounceTimer = setTimeout(async () => {
+    hookDebounceTimer = null;
+    console.log('[Hook Stop] Debounce elapsed, triggering auto-sync cycle now...');
+    try {
+      const cfg = loadConfig();
+      if (cfg.masterPassword) {
+        const engine = getSyncEngine();
+        const res = await engine.syncAll(cfg.masterPassword);
+        saveConfig({ lastSyncTime: new Date().toISOString() });
+        console.log(
+          `[Hook Sync] Success: pushed ${res.pushed.length} sessions, ${res.pushedWorkspaces?.length || 0} workspaces; restored ${res.restored.length} sessions, ${res.restoredWorkspaces?.length || 0} workspaces.`
+        );
+        repairAndReconcileAll();
+      }
+    } catch (err: any) {
+      console.error('[Hook Sync Error]', err.message);
+    }
+  }, delayMs);
+}
+
 
 // Run auto-sync check every 30 seconds
 setInterval(runAutoSyncCycle, 30000);
@@ -513,7 +543,73 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 12. Hook Stop (Session finished turn/generation, trigger debounced sync)
+  if (url.pathname === '/api/hook/stop' && req.method === 'POST') {
+    triggerDebouncedHookSync(15000);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, debouncedSeconds: 15 }));
+    return;
+  }
+
+  // 13. Delete Conversation API (Sets tombstone and removes local files)
+  if (url.pathname.match(/^\/api\/conversations\/[^\/]+\/delete$/) && req.method === 'POST') {
+    const conversationId = url.pathname.split('/')[3];
+    try {
+      const summary = sqlite.getSummary(conversationId);
+      const title = summary?.title || summary?.preview || conversationId;
+      const syncEngine = getSyncEngine();
+      syncEngine.markSessionDeleted(conversationId, title);
+
+      sqlite.deleteSummary(conversationId);
+      sqlite.deleteConversationFiles(conversationId, paths.root);
+
+      try {
+        syncAgyhubProtoFromDb(paths.summariesDbPath, paths.agyhubProtoPath);
+      } catch {}
+
+      // Trigger background sync if master password set
+      const cfg = loadConfig();
+      if (cfg.masterPassword) {
+        setTimeout(() => {
+          runAutoSyncCycle().catch(() => {});
+        }, 300);
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deletedId: conversationId }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 14. Workspace Sync API (Push specific workspace)
+  if (url.pathname.startsWith('/api/workspaces/sync/') && req.method === 'POST') {
+    const projectId = url.pathname.replace('/api/workspaces/sync/', '');
+    const body = await parseBody(req);
+    const password = body.password || loadConfig().masterPassword;
+
+    if (!password) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Master password is required' }));
+      return;
+    }
+
+    try {
+      const syncEngine = getSyncEngine();
+      const result = await syncEngine.pushWorkspace(projectId, password);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, result }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
   // Static files serving with flexible fallback
+
   const resolvedPath = resolveStaticFile(url.pathname);
   if (resolvedPath) {
     const ext = path.extname(resolvedPath);

@@ -16,9 +16,12 @@ build/
 # Bundles & Encrypted files
 *.bundle
 *.bundle.enc
+*.workspace.enc
 *.tar.gz
+synchronum_tombstones.json
 
 # Environment & Credentials
+
 .env
 .env.local
 credentials.json

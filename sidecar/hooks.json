@@ -4,9 +4,10 @@
     "Stop": [
       {
         "type": "command",
-        "command": "node --experimental-sqlite ./dist/cli.js status",
+        "command": "node --experimental-sqlite ./dist/cli.js hook-stop",
         "timeout": 30
       }
     ]
+
   }
 }

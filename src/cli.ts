@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
 import { loadConfig, renameDevice, saveConfig } from './config.js';
@@ -7,6 +8,7 @@ import { isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { getAntigravityPaths, validateAntigravityPaths } from './paths.js';
 import { repairAndReconcileAll } from './projects.js';
+import { syncAgyhubProtoFromDb } from './proto-sync.js';
 import { installService, isServiceInstalled, isServiceRunning, startService, stopService, uninstallService } from './service.js';
 import { AntigravitySqlite } from './sqlite.js';
 import { createStorageProvider, LocalFolderStorageProvider } from './storage.js';
@@ -281,6 +283,118 @@ program
       process.exit(1);
     }
   });
+
+program
+  .command('hook-stop')
+  .description('Notify Synchronum that an Antigravity generation/task has stopped (debounced auto-sync)')
+  .action(async () => {
+    try {
+      const running = await isServiceRunning();
+      if (running.running) {
+        const req = http.request(
+          `http://127.0.0.1:${running.port}/api/hook/stop`,
+          { method: 'POST', timeout: 3000 },
+          () => process.exit(0)
+        );
+        req.on('error', () => process.exit(0));
+        req.end();
+      } else {
+        process.exit(0);
+      }
+    } catch {
+      process.exit(0);
+    }
+  });
+
+program
+  .command('sync')
+  .description('Perform full two-way E2EE sync of sessions, workspaces, and tombstones')
+  .option('-p, --password <password>', 'Master password for E2EE')
+  .action(async (options) => {
+    try {
+      const config = loadConfig();
+      const pwd = options.password || config.masterPassword;
+      if (!pwd) {
+        console.error('\n❌ Master password is required for sync. Provide -p "password" or set in config.\n');
+        process.exit(1);
+      }
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Running two-way sync via ${storage.name}...`);
+      const result = await engine.syncAll(pwd);
+      console.log('\n=== Synchronum Sync Result ===');
+      console.log(`Sessions Pushed:     ${result.pushed.length} (${result.pushed.join(', ') || 'None'})`);
+      console.log(`Sessions Restored:   ${result.restored.length} (${result.restored.join(', ') || 'None'})`);
+      console.log(`Sessions Deleted:    ${result.deletedSessions?.length || 0} (${result.deletedSessions?.join(', ') || 'None'})`);
+      console.log(`Workspaces Pushed:   ${result.pushedWorkspaces?.length || 0} (${result.pushedWorkspaces?.join(', ') || 'None'})`);
+      console.log(`Workspaces Restored: ${result.restoredWorkspaces?.length || 0} (${result.restoredWorkspaces?.join(', ') || 'None'})`);
+      console.log(`Workspaces Skipped:  ${result.skippedWorkspaces?.length || 0}`);
+      repairAndReconcileAll();
+      console.log('\n✅ Antigravity environment updated!\n');
+    } catch (err: any) {
+      console.error(`\n❌ Sync failed: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('push-workspace <projectId>')
+  .description('Encrypt and upload a non-git project workspace to cloud')
+  .option('-p, --password <password>', 'Master password for E2EE encryption')
+  .action(async (projectId, options) => {
+    try {
+      const config = loadConfig();
+      const pwd = options.password || config.masterPassword;
+      if (!pwd) {
+        console.error('\n❌ Master password is required.\n');
+        process.exit(1);
+      }
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+      console.log(`\n🔄 Packaging and uploading workspace: ${projectId}...`);
+      const res = await engine.pushWorkspace(projectId, pwd);
+      console.log(`✅ Successfully uploaded workspace [${res.projectName}]!`);
+      console.log(`   Hash:  ${res.hash}`);
+      console.log(`   Size:  ${(res.bytes / 1024).toFixed(2)} KB\n`);
+    } catch (err: any) {
+      console.error(`\n❌ Failed to push workspace: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('delete-session <conversationId>')
+  .description('Delete a conversation, set a tombstone, and remove local files')
+  .action(async (conversationId) => {
+    try {
+      const paths = getAntigravityPaths();
+      const sqlite = new AntigravitySqlite(paths.summariesDbPath);
+      const summary = sqlite.getSummary(conversationId);
+      const title = summary?.title || summary?.preview || conversationId;
+
+      const config = loadConfig();
+      const oauth = new GoogleDriveOAuth();
+      const storage = createStorageProvider(config, oauth);
+      const engine = new SynchronumSyncEngine(storage);
+
+      engine.markSessionDeleted(conversationId, title);
+      sqlite.deleteSummary(conversationId);
+      sqlite.deleteConversationFiles(conversationId, paths.root);
+
+      try {
+        syncAgyhubProtoFromDb(paths.summariesDbPath, paths.agyhubProtoPath);
+      } catch {}
+
+      console.log(`\n✅ Conversation [${conversationId}] deleted and tombstoned.`);
+      console.log(`   Other devices will not restore it, and will delete it upon next sync.\n`);
+    } catch (err: any) {
+      console.error(`\n❌ Failed to delete conversation: ${err.message}\n`);
+      process.exit(1);
+    }
+  });
+
 
 program
   .command('cloud-list')
