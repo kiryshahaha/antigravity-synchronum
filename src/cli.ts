@@ -1,3 +1,4 @@
+#!/usr/bin/env -S node --experimental-sqlite
 import { Command } from 'commander';
 import fs from 'node:fs';
 import http from 'node:http';
