@@ -32,6 +32,24 @@
   <!-- Toast Notification -->
   <div id="toast" class="fixed top-3 right-3 z-50 transform transition-all duration-300 opacity-0 pointer-events-none translate-y-[-10px] px-3.5 py-2 rounded-xl shadow-xl flex items-center gap-2 border text-xs font-medium"></div>
 
+  <!-- Device Rename Modal -->
+  <div id="rename-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-4 shadow-2xl flex flex-col gap-3">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
+          <span>💻</span> Переименовать устройство
+        </h3>
+        <button onclick="closeRenameModal()" class="text-slate-400 hover:text-slate-200 text-sm">✕</button>
+      </div>
+      <p class="text-xs text-slate-400">Это имя отображается на других компьютерах и в облачном каталоге сессий.</p>
+      <input type="text" id="rename-input" placeholder="Например: Домашний ПК, Ноутбук" class="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-500" onkeydown="if(event.key==='Enter')submitRenameDevice()" />
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeRenameModal()" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs">Отмена</button>
+        <button onclick="submitRenameDevice()" class="px-3 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
   <div class="max-w-4xl w-full mx-auto flex flex-col gap-2.5 flex-1">
 
     <!-- Top Header -->
@@ -460,27 +478,52 @@
       window.open(`/api/export/${id}${masterPassword ? `?password=${encodeURIComponent(masterPassword)}` : ''}`, '_blank');
     }
 
-    async function promptRenameDevice() {
+    function openRenameModal() {
       const current = document.getElementById('current-device-name').innerText;
-      const newName = prompt('Введите новое имя для этого устройства:', current);
-      if (newName && newName.trim() && newName.trim() !== current) {
-        try {
-          const res = await fetch('/api/device/rename', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName.trim() })
-          });
-          const data = await res.json();
-          if (data.success) {
-            showToast('Устройство переименовано: ' + data.deviceName);
-            checkStatus();
-            loadDevices();
-          } else {
-            showToast('Ошибка: ' + data.error, 'error');
-          }
-        } catch {
-          showToast('Ошибка сети', 'error');
+      const input = document.getElementById('rename-input');
+      input.value = current;
+      const modal = document.getElementById('rename-modal');
+      modal.classList.remove('hidden');
+      setTimeout(() => input.focus(), 50);
+    }
+
+    function closeRenameModal() {
+      document.getElementById('rename-modal').classList.add('hidden');
+    }
+
+    function promptRenameDevice() {
+      openRenameModal();
+    }
+
+    async function submitRenameDevice() {
+      const input = document.getElementById('rename-input');
+      const newName = input.value.trim();
+      const current = document.getElementById('current-device-name').innerText;
+      if (!newName) {
+        showToast('Имя не может быть пустым', 'error');
+        return;
+      }
+      closeRenameModal();
+      if (newName === current) return;
+
+      try {
+        const res = await fetch('/api/device/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Устройство переименовано: ' + data.deviceName);
+          document.getElementById('current-device-name').innerText = data.deviceName;
+          currentConfig.deviceName = data.deviceName;
+          checkStatus();
+          loadDevices();
+        } else {
+          showToast('Ошибка: ' + data.error, 'error');
         }
+      } catch {
+        showToast('Ошибка сети', 'error');
       }
     }
 
