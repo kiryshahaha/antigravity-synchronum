@@ -33,7 +33,7 @@
   <div id="toast" class="fixed top-3 right-3 z-50 transform transition-all duration-300 opacity-0 pointer-events-none translate-y-[-10px] px-3.5 py-2 rounded-xl shadow-xl flex items-center gap-2 border text-xs font-medium"></div>
 
   <!-- Device Rename Modal -->
-  <div id="rename-modal" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center p-4">
+  <div id="rename-modal" style="display: none;" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm items-center justify-center p-4">
     <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-sm w-full p-4 shadow-2xl flex flex-col gap-3">
       <div class="flex items-center justify-between">
         <h3 class="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
@@ -483,12 +483,12 @@
       const input = document.getElementById('rename-input');
       input.value = current;
       const modal = document.getElementById('rename-modal');
-      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
       setTimeout(() => input.focus(), 50);
     }
 
     function closeRenameModal() {
-      document.getElementById('rename-modal').classList.add('hidden');
+      document.getElementById('rename-modal').style.display = 'none';
     }
 
     function promptRenameDevice() {
@@ -528,11 +528,7 @@
     }
 
     async function purgeDeviceSyncData() {
-      const devName = currentConfig.deviceName || 'это устройство';
-      if (!confirm(`Вы действительно хотите удалить ВСЕ синхронизированные данные в облаке для устройства "${devName}"?\n\nЛокальные файлы на этом ПК затронуты не будут. Облачные копии этого устройства будут удалены.`)) {
-        return;
-      }
-      showToast('Удаление синхронизаций устройства...');
+      showToast('Удаление синхронизаций устройства из облака...');
       try {
         const res = await fetch('/api/device/purge-sync', { method: 'POST' });
         const data = await res.json();
@@ -541,7 +537,7 @@
           loadDevices();
           checkStatus();
         } else {
-          showToast('Ошибка: ' + data.error, 'error');
+          showToast('Ошибка: ' + (data.error || 'Сбой'), 'error');
         }
       } catch {
         showToast('Ошибка сети', 'error');
@@ -567,9 +563,6 @@
 
     async function deleteSessionSingle(conversationId, e) {
       if (e) e.stopPropagation();
-      if (!confirm('Удалить этот диалог? Он будет удалён локально и помечен как deleted для всех устройств.')) {
-        return;
-      }
       showToast('Удаление диалога...');
       try {
         const res = await fetch(`/api/conversations/${conversationId}/delete`, {
