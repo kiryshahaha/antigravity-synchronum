@@ -2,7 +2,9 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SynchronumBundler } from './bundler.js';
+
 import { loadConfig, renameDevice, saveConfig } from './config.js';
 import { isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
@@ -51,7 +53,68 @@ program
   });
 
 program
+  .command('setup')
+  .description('One-click setup: install Sidecar into Antigravity, configure storage, and verify environment')
+  .option('-p, --password <password>', 'Master password for Zero-Knowledge E2EE')
+  .option('--storage <type>', 'Storage type (gdrive or local_folder)')
+  .option('--folder <path>', 'Local folder path for sync (if using local_folder)')
+  .option('--device-name <name>', 'Custom name for this device')
+  .option('--autostart', 'Install background OS autostart service')
+  .action(async (options) => {
+    console.log('\n🚀 === Synchronum: One-Click Environment Setup ===\n');
+    const paths = getAntigravityPaths();
+    fs.mkdirSync(paths.root, { recursive: true });
+    fs.mkdirSync(paths.conversationsDir, { recursive: true });
+    fs.mkdirSync(paths.brainDir, { recursive: true });
+
+    // 1. Install / update Sidecar
+    const targetSidecarDir = path.join(paths.root, 'sidecars', 'synchronum');
+    const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const sourceSidecarDir = path.join(repoRoot, 'sidecar');
+
+    console.log(`📦 Deploying Sidecar extension into Antigravity...`);
+    if (fs.existsSync(sourceSidecarDir)) {
+      fs.mkdirSync(targetSidecarDir, { recursive: true });
+      fs.cpSync(sourceSidecarDir, targetSidecarDir, { recursive: true });
+      const distDir = path.join(repoRoot, 'dist');
+      if (fs.existsSync(distDir)) {
+        fs.cpSync(distDir, path.join(targetSidecarDir, 'dist'), { recursive: true });
+      }
+      console.log(`✅ Sidecar installed to: ${targetSidecarDir}`);
+    } else {
+      console.log(`⚠️  Sidecar template folder not found at ${sourceSidecarDir}`);
+    }
+
+    // 2. Save Config
+    const updates: any = {};
+    if (options.password) updates.masterPassword = options.password;
+    if (options.storage) updates.storageType = options.storage;
+    if (options.folder) updates.localFolderPath = path.resolve(options.folder);
+    if (options.deviceName) updates.deviceName = options.deviceName;
+    if (options.autostart) updates.autostartService = true;
+    const config = saveConfig(updates);
+    console.log(`⚙️  Configuration saved: Storage=${config.storageType}, Device=${config.deviceName}`);
+
+    // 3. Autostart service if requested
+    if (options.autostart) {
+      console.log(`🔄 Installing background OS service...`);
+      await installService(repoRoot);
+      console.log(`✅ Background service active.`);
+    }
+
+    // 4. Reconcile Antigravity
+    console.log(`🔄 Reconciling Antigravity projects and protobuf cache...`);
+    const rep = repairAndReconcileAll();
+    console.log(`✅ Environment synchronized: ${rep.totalProjects} projects registered, ${rep.protoSynced} dialogues ready in IDE.`);
+
+    console.log(`\n🎉 Synchronum v1.0.0 is ready to use!`);
+    console.log(`👉 Restart Antigravity 2.0 to access the Synchronum dashboard in Auxiliary Pane.`);
+    console.log(`👉 Or run: synchronum sync (to sync right away)\n`);
+  });
+
+program
   .command('list')
+
   .description('List recent Antigravity conversations')
   .option('-n, --limit <number>', 'Number of conversations to display', '15')
   .action((options) => {
@@ -238,34 +301,7 @@ program
   });
 
 program
-  .command('sync')
-  .description('Two-way safe synchronization: push local changes and pull remote updates')
-  .requiredOption('-p, --password <password>', 'Master password for E2EE sync')
-  .action(async (options) => {
-    try {
-      const config = loadConfig();
-      saveConfig({ masterPassword: options.password });
-      const oauth = new GoogleDriveOAuth();
-      const storage = createStorageProvider(config, oauth);
-      const engine = new SynchronumSyncEngine(storage);
-      console.log(`\n🔄 Running two-way safe sync via ${storage.name}...`);
 
-      const result = await engine.syncAll(options.password);
-      console.log(`\n✅ Sync completed!`);
-      console.log(`   Pushed (${result.pushed.length}):   ${result.pushed.join(', ') || 'None'}`);
-      console.log(`   Restored (${result.restored.length}): ${result.restored.join(', ') || 'None'}`);
-      console.log(`   Up-to-date (${result.skipped.length}): ${result.skipped.join(', ') || 'None'}\n`);
-
-      console.log(`🔄 Reconciling Antigravity projects and binary protobuf...`);
-      const rep = repairAndReconcileAll();
-      console.log(`✅ Antigravity environment updated: ${rep.totalProjects} projects registered, ${rep.protoSynced} dialogues ready in IDE!\n`);
-    } catch (err: any) {
-      console.error(`\n❌ Sync failed: ${err.message}\n`);
-      process.exit(1);
-    }
-  });
-
-program
   .command('repair')
   .description('Automatically repair Antigravity projects registry, layouts, and binary protobuf cache')
   .action(() => {

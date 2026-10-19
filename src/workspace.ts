@@ -40,14 +40,19 @@ export const DEFAULT_WORKSPACE_IGNORES = [
   '*.workspace.enc',
 ];
 
+export const MAX_SINGLE_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
+export const MAX_WORKSPACE_TOTAL_BYTES = 100 * 1024 * 1024; // 100 MB
+
 export interface WorkspaceScanResult {
   hash: string;
   fileCount: number;
   totalBytes: number;
   files: { relPath: string; fullPath: string; size: number; mtime: number }[];
+  warning?: string;
 }
 
 export class WorkspaceManager {
+
   private static parseGitignore(folderPath: string): string[] {
     const gitignorePath = path.join(folderPath, '.gitignore');
     if (!fs.existsSync(gitignorePath)) return [];
@@ -117,6 +122,12 @@ export class WorkspaceManager {
         if (entry.isFile()) {
           try {
             const stat = fs.statSync(full);
+            if (stat.size > MAX_SINGLE_FILE_BYTES) {
+              console.warn(
+                `[Workspace Warning] Skipping large file (${(stat.size / (1024 * 1024)).toFixed(1)} MB > 25 MB limit): ${rel}. Consider adding it to .gitignore.`
+              );
+              continue;
+            }
             files.push({
               relPath: rel,
               fullPath: full,
@@ -133,8 +144,15 @@ export class WorkspaceManager {
 
     walk(folderPath);
 
+    let warning: string | undefined;
+    if (totalBytes > MAX_WORKSPACE_TOTAL_BYTES) {
+      warning = `Воркспейс превышает 100 МБ (${(totalBytes / (1024 * 1024)).toFixed(1)} МБ). Рекомендуется добавить большие файлы в .gitignore.`;
+      console.warn(`[Workspace Warning] ${warning}`);
+    }
+
     // Sort deterministically
     files.sort((a, b) => a.relPath.localeCompare(b.relPath));
+
 
     // Calculate content hash
     const hashSum = crypto.createHash('sha256');
@@ -156,7 +174,9 @@ export class WorkspaceManager {
       fileCount: files.length,
       totalBytes,
       files,
+      warning,
     };
+
   }
 
   public static async exportWorkspace(
