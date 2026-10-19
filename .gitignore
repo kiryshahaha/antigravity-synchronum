@@ -19,6 +19,7 @@ build/
 *.workspace.enc
 *.tar.gz
 synchronum_tombstones.json
+release/
 
 # Environment & Credentials
 
