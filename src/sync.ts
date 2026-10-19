@@ -663,6 +663,23 @@ export class SynchronumSyncEngine {
     return result;
   }
 
+  public async deleteDeviceData(deviceId: string): Promise<{ deletedFiles: number }> {
+    const allFiles = await this.storage.listFiles();
+    const prefix = `devices/${deviceId}/`;
+    let count = 0;
+    for (const f of allFiles) {
+      if (f.name.startsWith(prefix) || f.name === prefix.slice(0, -1)) {
+        try {
+          await this.storage.deleteFile(f.id || f.name);
+          count++;
+        } catch (err: any) {
+          console.warn(`[Delete Device Data] Could not delete ${f.name}:`, err.message);
+        }
+      }
+    }
+    return { deletedFiles: count };
+  }
+
   // Alias for backward compatibility
   public async pullAll(password: string): Promise<{ restored: string[]; skipped: string[] }> {
     const result = await this.syncAll(password);

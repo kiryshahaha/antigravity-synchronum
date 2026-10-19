@@ -608,6 +608,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 15. Device Rename API
+  if (url.pathname === '/api/device/rename' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      if (!body.name || !body.name.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Имя устройства не может быть пустым' }));
+        return;
+      }
+      const updated = renameDevice(body.name.trim());
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deviceName: updated.deviceName }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // 16. Purge All Sync Data for Current Device API
+  if (url.pathname === '/api/device/purge-sync' && req.method === 'POST') {
+    try {
+      const engine = getSyncEngine();
+      const myId = engine.getDeviceId();
+      const result = await engine.deleteDeviceData(myId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, deletedFiles: result.deletedFiles }));
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
   // Static files serving with flexible fallback
 
   const resolvedPath = resolveStaticFile(url.pathname);

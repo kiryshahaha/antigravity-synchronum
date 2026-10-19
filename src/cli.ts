@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SynchronumBundler } from './bundler.js';
@@ -67,20 +68,64 @@ program
     fs.mkdirSync(paths.conversationsDir, { recursive: true });
     fs.mkdirSync(paths.brainDir, { recursive: true });
 
-    // 1. Install / update Sidecar
+    // 1. Install / update Sidecar and Plugin
     const targetSidecarDir = path.join(paths.root, 'sidecars', 'synchronum');
     const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const sourceSidecarDir = path.join(repoRoot, 'sidecar');
+    const globalConfigDir = path.resolve(os.homedir(), '.gemini', 'config');
+    const targetPluginDir = path.join(globalConfigDir, 'plugins', 'synchronum');
+    const targetPluginSidecarDir = path.join(targetPluginDir, 'sidecars', 'synchronum');
 
-    console.log(`📦 Deploying Sidecar extension into Antigravity...`);
+    console.log(`📦 Deploying Sidecar & Plugin extensions into Antigravity...`);
     if (fs.existsSync(sourceSidecarDir)) {
+      // Deploy legacy sidecar
       fs.mkdirSync(targetSidecarDir, { recursive: true });
       fs.cpSync(sourceSidecarDir, targetSidecarDir, { recursive: true });
       const distDir = path.join(repoRoot, 'dist');
       if (fs.existsSync(distDir)) {
         fs.cpSync(distDir, path.join(targetSidecarDir, 'dist'), { recursive: true });
       }
-      console.log(`✅ Sidecar installed to: ${targetSidecarDir}`);
+
+      // Deploy modern plugin
+      fs.mkdirSync(targetPluginDir, { recursive: true });
+      fs.mkdirSync(targetPluginSidecarDir, { recursive: true });
+      fs.cpSync(sourceSidecarDir, targetPluginSidecarDir, { recursive: true });
+      if (fs.existsSync(distDir)) {
+        fs.cpSync(distDir, path.join(targetPluginSidecarDir, 'dist'), { recursive: true });
+      }
+
+      // Copy node_modules so sidecar process doesn't fail on missing adm-zip / commander
+      const nodeModulesDir = path.join(repoRoot, 'node_modules');
+      if (fs.existsSync(nodeModulesDir)) {
+        fs.cpSync(nodeModulesDir, path.join(targetPluginSidecarDir, 'node_modules'), { recursive: true });
+        fs.cpSync(nodeModulesDir, path.join(targetSidecarDir, 'node_modules'), { recursive: true });
+      }
+
+      // Create plugin.json
+      const pluginManifest = {
+        name: 'synchronum',
+        description: 'Zero-Knowledge E2EE Cross-Device Sync for Antigravity 2.0 conversations, workspaces, and artifacts.',
+        suggestedPrompts: [
+          'Run Synchronum sync to backup current conversations',
+          'Show Synchronum synchronization status',
+          'Push current non-git workspace to Synchronum cloud'
+        ]
+      };
+      fs.writeFileSync(path.join(targetPluginDir, 'plugin.json'), JSON.stringify(pluginManifest, null, 2), 'utf-8');
+
+      // Enable in config.json
+      try {
+        const cfgJsonPath = path.join(globalConfigDir, 'config.json');
+        let globalCfg: any = {};
+        if (fs.existsSync(cfgJsonPath)) {
+          globalCfg = JSON.parse(fs.readFileSync(cfgJsonPath, 'utf-8'));
+        }
+        if (!globalCfg.plugins) globalCfg.plugins = {};
+        globalCfg.plugins.synchronum = { enabled: true };
+        fs.writeFileSync(cfgJsonPath, JSON.stringify(globalCfg, null, 2), 'utf-8');
+      } catch {}
+
+      console.log(`✅ Sidecar & Plugin installed to: ${targetPluginDir}`);
     } else {
       console.log(`⚠️  Sidecar template folder not found at ${sourceSidecarDir}`);
     }

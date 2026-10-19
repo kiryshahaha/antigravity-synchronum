@@ -1,6 +1,6 @@
 {
-  "command": "node",
-  "args": ["--experimental-sqlite", "./dist/sidecar-server.js"],
+  "command": "cmd.exe",
+  "args": ["/c", "start.bat"],
   "restart_policy": "always",
   "display_name": "Synchronum",
   "description": "Cross-device E2EE synchronization for Google Antigravity 2.0 sessions",
