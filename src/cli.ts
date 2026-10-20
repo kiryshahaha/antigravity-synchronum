@@ -159,6 +159,87 @@ program
   });
 
 program
+  .command('uninstall')
+  .description('Completely remove Synchronum plugin, sidecars, autostart service, and config from this device')
+  .option('--keep-config', 'Do not delete synchronum_config.json')
+  .action(async (options) => {
+    console.log('\n🧹 === Synchronum: Uninstall & Cleanup ===\n');
+    const paths = getAntigravityPaths();
+    const globalConfigDir = path.resolve(os.homedir(), '.gemini', 'config');
+
+    try {
+      console.log('🛑 Stopping background service...');
+      await stopService();
+      await uninstallService();
+      console.log('✅ Background service uninstalled.');
+    } catch (e: any) {
+      console.warn('⚠️ Service uninstall notice:', e.message);
+    }
+
+    const sidecarDirs = [
+      path.join(paths.root, 'sidecars', 'synchronum'),
+      path.join(globalConfigDir, 'plugins', 'synchronum'),
+      path.join(globalConfigDir, 'sidecars', 'synchronum'),
+    ];
+
+    for (const dir of sidecarDirs) {
+      if (fs.existsSync(dir)) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+          console.log(`🗑️ Removed: `);
+        } catch (e: any) {
+          console.warn(`⚠️ Failed to remove :`, e.message);
+        }
+      }
+    }
+
+    try {
+      const cfgJsonPath = path.join(globalConfigDir, 'config.json');
+      if (fs.existsSync(cfgJsonPath)) {
+        const raw = fs.readFileSync(cfgJsonPath, 'utf-8');
+        const globalCfg = JSON.parse(raw);
+        let modified = false;
+        if (globalCfg.plugins && globalCfg.plugins.synchronum) {
+          delete globalCfg.plugins.synchronum;
+          modified = true;
+        }
+        if (globalCfg.sidecars && globalCfg.sidecars['synchronum/synchronum']) {
+          delete globalCfg.sidecars['synchronum/synchronum'];
+          modified = true;
+        }
+        if (modified) {
+          fs.writeFileSync(cfgJsonPath, JSON.stringify(globalCfg, null, 2), 'utf-8');
+          console.log(`✅ Cleaned plugins & sidecars from `);
+        }
+      }
+    } catch (e: any) {
+      console.warn('⚠️ Could not update config.json:', e.message);
+    }
+
+    const logPath = path.join(paths.root, 'synchronum.log');
+    if (fs.existsSync(logPath)) {
+      try {
+        fs.unlinkSync(logPath);
+        console.log(`🗑️ Removed: `);
+      } catch {}
+    }
+
+    if (!options.keepConfig) {
+      const configPath = path.join(paths.root, 'synchronum_config.json');
+      if (fs.existsSync(configPath)) {
+        try {
+          fs.unlinkSync(configPath);
+          console.log(`🗑️ Removed: `);
+        } catch (e: any) {
+          console.warn(`⚠️ Failed to remove :`, e.message);
+        }
+      }
+    }
+
+    console.log('\n✨ Synchronum has been completely removed from this device.\n');
+  });
+
+program
   .command('list')
 
   .description('List recent Antigravity conversations')

@@ -20,7 +20,9 @@
     "start": "node --experimental-sqlite ./dist/cli.js",
     "dev": "tsx --experimental-sqlite ./src/cli.ts",
     "test": "tsx --experimental-sqlite --test test/**/*.test.ts",
-    "bundle": "npx tsx scripts/build-bundles.ts"
+    "bundle": "npx tsx scripts/build-bundles.ts",
+    "setup": "node --experimental-sqlite ./dist/cli.js setup",
+    "uninstall": "node --experimental-sqlite ./dist/cli.js uninstall"
   },
   "keywords": [
     "antigravity",
