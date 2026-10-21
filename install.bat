@@ -10,7 +10,7 @@ echo.
 where node >nul 2>nul
 if %errorlevel% neq 0 (
   echo [ERROR] Node.js is not found in PATH!
-  echo Please install Node.js (v20+) from https://nodejs.org/
+  echo Please install Node.js v20 or newer from https://nodejs.org/
   echo.
   pause
   exit /b 1
