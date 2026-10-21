@@ -1,6 +1,6 @@
 {
   "name": "antigravity-synchronum",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Cross-device conversation & artifact synchronization for Google Antigravity 2.0 with Zero-Knowledge E2EE.",
   "type": "module",
   "main": "./dist/cli.js",
@@ -43,6 +43,7 @@
     "@types/adm-zip": "^0.5.8",
     "@types/archiver": "^8.0.0",
     "@types/node": "^26.6.4",
+    "tailwindcss": "^3.4.19",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
