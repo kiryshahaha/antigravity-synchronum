@@ -35,6 +35,20 @@ let currentConfig: SynchronumConfig = loadConfig();
 let currentStorage: SyncStorageProvider = createStorageProvider(currentConfig, oauth);
 let watcher: SynchronumWatcher | null = null;
 
+const sseClients = new Set<http.ServerResponse>();
+
+export function broadcastEvent(event: string, data: any = {}) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const client of sseClients) {
+    try {
+      client.write(payload);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
+
 function getSyncEngine(): SynchronumSyncEngine {
   currentConfig = loadConfig();
   currentStorage = createStorageProvider(currentConfig, oauth);
@@ -68,6 +82,7 @@ async function runAutoSyncCycle(): Promise<void> {
     try {
       repairAndReconcileAll();
     } catch {}
+    broadcastEvent('sync_completed');
   } catch (err: any) {
     console.error('[Auto-Sync Error]', err.message);
   } finally {
@@ -94,6 +109,7 @@ export function triggerDebouncedHookSync(delayMs = 15000): void {
           `[Hook Sync] Success: pushed ${res.pushed.length} sessions, ${res.pushedWorkspaces?.length || 0} workspaces; restored ${res.restored.length} sessions, ${res.restoredWorkspaces?.length || 0} workspaces.`
         );
         repairAndReconcileAll();
+        broadcastEvent('sync_completed');
       }
     } catch (err: any) {
       console.error('[Hook Sync Error]', err.message);
@@ -115,7 +131,13 @@ setTimeout(() => {
     if (!watcher) {
       const engine = getSyncEngine();
       watcher = new SynchronumWatcher(engine);
-      watcher.start({ debounceMs: 3000, pollIntervalMs: 10000 });
+      watcher.start({
+        debounceMs: 3000,
+        pollIntervalMs: 10000,
+        onLocalChange: () => broadcastEvent('conversations_changed'),
+        onPush: () => broadcastEvent('sync_completed'),
+        onPull: () => broadcastEvent('sync_completed'),
+      });
     }
     runAutoSyncCycle().catch(() => {});
   }
@@ -173,6 +195,23 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+
+  // 0. Server-Sent Events for real-time reactivity
+  if (url.pathname === '/api/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.write('event: connected\ndata: {}\n\n');
+    sseClients.add(res);
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
     return;
   }
 

@@ -11,6 +11,7 @@ export interface WatcherOptions {
   pollIntervalMs?: number;
   onPush?: (count: number) => void;
   onPull?: (count: number) => void;
+  onLocalChange?: () => void;
 }
 
 export class SynchronumWatcher {
@@ -94,6 +95,7 @@ export class SynchronumWatcher {
 
             // Trigger on database changes (.db or .db-wal)
             if (filename.endsWith('.db') || filename.endsWith('.db-wal') || filename.endsWith('.pb')) {
+              options.onLocalChange?.();
               this.scheduleDebouncedPush(debounceMs, options.onPush);
             }
           }

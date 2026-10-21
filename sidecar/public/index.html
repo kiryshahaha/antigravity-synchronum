@@ -775,13 +775,61 @@
       }
     }
 
+    function initRealtimeReactivity() {
+      // 1. Server-Sent Events (SSE) for instant real-time events from server
+      if (window.EventSource) {
+        try {
+          const sse = new EventSource('/api/events');
+          sse.addEventListener('conversations_changed', () => {
+            loadGroupedData();
+            checkStatus();
+            loadDevices();
+          });
+          sse.addEventListener('sync_completed', () => {
+            loadGroupedData();
+            checkStatus();
+            loadDevices();
+          });
+          sse.addEventListener('device_updated', () => {
+            checkStatus();
+            loadDevices();
+          });
+          sse.onerror = () => {
+            // Reconnects automatically by browser spec
+          };
+        } catch {}
+      }
+
+      // 2. Tab visibility change & Window focus (e.g. switching back to Antigravity)
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+          loadGroupedData();
+          checkStatus();
+          loadDevices();
+        }
+      });
+      window.addEventListener('focus', () => {
+        loadGroupedData();
+        checkStatus();
+        loadDevices();
+      });
+
+      // 3. Fallback smart poll every 5s to keep device statuses & counts updated
+      setInterval(() => {
+        if (!document.hidden) {
+          checkStatus();
+          loadDevices();
+        }
+      }, 5000);
+    }
+
     // Initialize
     window.addEventListener('DOMContentLoaded', () => {
       loadConfig();
       checkStatus();
       loadDevices();
       loadGroupedData();
-      setInterval(checkStatus, 15000);
+      initRealtimeReactivity();
     });
   </script>
 </body>
