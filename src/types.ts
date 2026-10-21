@@ -110,5 +110,6 @@ export interface SessionTombstone {
   deleted_at: string;
   title?: string;
   author_device?: string;
+  deleted_by_device?: string;
 }
 

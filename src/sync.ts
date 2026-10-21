@@ -41,7 +41,7 @@ export interface RemoteIndex {
   device_name: string;
   sessions: Record<string, RemoteSessionEntry>;
   workspaces?: Record<string, RemoteWorkspaceEntry>;
-  tombstones?: Record<string, TombstoneEntry>;
+  tombstones?: Record<string, any>;
 }
 
 
@@ -452,17 +452,49 @@ export class SynchronumSyncEngine {
 
     // Any session previously registered in myIndex that is now gone from SQLite was deleted by the user!
     for (const [id, entry] of Object.entries(myIndex.sessions)) {
-      if (!entry.deleted && !localMap.has(id)) {
-        entry.deleted = true;
-        entry.deleted_at = new Date().toISOString();
-        tombstones[id] = {
+      if (!localMap.has(id)) {
+        if (!entry.deleted) {
+          console.log(`[Tombstone] Local deletion detected: '${entry.title || id}' (${id}) -> marking DELETED`);
+          entry.deleted = true;
+          entry.deleted_at = new Date().toISOString();
+        }
+        const tomb: TombstoneEntry = {
           conversation_id: id,
-          deleted_at: entry.deleted_at,
+          deleted_at: entry.deleted_at || new Date().toISOString(),
           title: entry.title,
-          author_device: this.getDeviceName(),
+          deleted_by_device: this.getDeviceName(),
         };
+        tombstones[id] = tomb;
+        this.tombstones.recordLocalTombstone(id, entry.title);
+
+        // Delete remote bundle file from cloud so it doesn't linger
+        try {
+          if (entry.file_id || entry.file_name) {
+            await this.storage.deleteFile(entry.file_id || entry.file_name);
+          }
+        } catch {}
       }
     }
+
+    // Check if any non-git workspace was deleted locally
+    if (myIndex.workspaces) {
+      const localProjects = getLocalProjectsWithDetails();
+      for (const [wsId, wsEntry] of Object.entries(myIndex.workspaces)) {
+        const stillExists = localProjects.some(p => p.id === wsId && p.folderExists);
+        if (!stillExists && !wsEntry.deleted) {
+          console.log(`[Tombstone] Workspace deletion detected: '${wsEntry.project_name}' (${wsId}) -> marking DELETED`);
+          wsEntry.deleted = true;
+          wsEntry.deleted_at = new Date().toISOString();
+          try {
+            if (wsEntry.file_id || wsEntry.file_name) {
+              await this.storage.deleteFile(wsEntry.file_id || wsEntry.file_name);
+            }
+          } catch {}
+        }
+      }
+    }
+
+    myIndex.tombstones = tombstones;
     this.saveLocalTombstones(tombstones);
 
     // 2. Phase 1: Publish Own Sessions to devices/<myId>/
@@ -595,6 +627,20 @@ export class SynchronumSyncEngine {
           restored.push(remoteEntry.title || id);
           localMap.set(id, this.sqlite.getSummary(id)!);
           dbChanged = true;
+
+          // Track in myIndex so future local deletion of this session is detected
+          myIndex.sessions[id] = {
+            conversation_id: id,
+            title: remoteEntry.title,
+            step_count: remoteEntry.step_count,
+            last_modified_time: remoteEntry.last_modified_time,
+            file_name: remoteEntry.file_name,
+            file_id: remoteEntry.file_id,
+            size_bytes: remoteEntry.size_bytes,
+            updated_at: new Date().toISOString(),
+            author_device: remoteEntry.author_device || otherId,
+            deleted: false,
+          };
         } catch (err: any) {
           console.error(`[Sync] Error restoring session ${id} from ${otherId}:`, err.message);
         } finally {
@@ -665,6 +711,7 @@ export class SynchronumSyncEngine {
       }
     }
 
+    myIndex.tombstones = tombstones;
     this.saveLocalTombstones(tombstones);
     await this.saveDeviceIndex(myId, myIndex, password);
 
