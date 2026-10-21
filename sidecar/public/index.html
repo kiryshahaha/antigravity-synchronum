@@ -364,15 +364,17 @@
           return;
         }
 
-        const myName = currentConfig.deviceName || 'Laptop-Work';
+        const myName = currentConfig.deviceName || '';
+        const myId = currentConfig.deviceId || '';
         container.innerHTML = devices.map(d => {
-          const isMe = d.name === myName || d.id === 'Laptop-Work';
+          const isMe = (myId && d.id === myId) || (myName && d.name === myName);
           return `
             <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] shrink-0 ${
               isMe ? 'bg-sky-500/15 border-sky-500/30 text-sky-300 font-medium' : 'bg-slate-800 border-slate-700 text-slate-300'
             }">
               <span>${isMe ? '💻' : '🖥️'}</span>
               <span>${d.name || d.id}</span>
+              ${isMe ? '<span class="text-[9px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-200">текущее</span>' : ''}
               ${d.sessions_count ? `<span class="opacity-60 text-[10px]">(${d.sessions_count})</span>` : ''}
             </div>
           `;

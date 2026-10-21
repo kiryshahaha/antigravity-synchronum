@@ -138,7 +138,19 @@ program
     if (options.folder) updates.localFolderPath = path.resolve(options.folder);
     if (options.deviceName) updates.deviceName = options.deviceName;
     if (options.autostart) updates.autostartService = true;
-    const config = saveConfig(updates);
+    let config = saveConfig(updates);
+
+    // Auto-detect and adopt existing cloud device profile for this physical machine
+    try {
+      const storage = createStorageProvider(config, new GoogleDriveOAuth());
+      const engine = new SynchronumSyncEngine(storage);
+      const adopted = await engine.autoAdoptExistingDevice(config.masterPassword);
+      if (adopted.adopted) {
+        config = loadConfig();
+        console.log(`💻 Re-attached to known device profile: ${config.deviceId} ("${config.deviceName}")`);
+      }
+    } catch {}
+
     console.log(`⚙️  Configuration saved: Storage=${config.storageType}, Device=${config.deviceName}`);
 
     // 3. Autostart service if requested

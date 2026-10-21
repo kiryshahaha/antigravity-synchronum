@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SynchronumBundler } from './bundler.js';
 import { TombstoneEntry, TombstoneManager } from './tombstones.js';
-import { getDefaultDeviceId, getDefaultDeviceName, loadConfig } from './config.js';
+import { adoptDevice, getDefaultDeviceId, getDefaultDeviceName, getMachineId, loadConfig } from './config.js';
 import { decryptBuffer, encryptBuffer, isEncryptedBuffer } from './crypto.js';
 import { GoogleDriveOAuth } from './gdrive.js';
 import { PathResolver } from './path-resolver.js';
@@ -225,6 +225,7 @@ export class SynchronumSyncEngine {
       platform: os.platform(),
       updated_at: new Date().toISOString(),
       sessions_count: sessionsCount,
+      machine_id: getMachineId(),
     };
 
     const jsonBuffer = Buffer.from(JSON.stringify(info, null, 2), 'utf-8');
@@ -235,7 +236,43 @@ export class SynchronumSyncEngine {
     } catch {}
   }
 
+  public async autoAdoptExistingDevice(password?: string): Promise<{ adopted: boolean; deviceId: string; deviceName: string }> {
+    const currentMachineId = getMachineId();
+    const currentHostname = os.hostname();
+
+    try {
+      const deviceIds = await this.storage.listDevices();
+      if (!deviceIds || deviceIds.length === 0) {
+        return { adopted: false, deviceId: this.getDeviceId(), deviceName: this.getDeviceName() };
+      }
+
+      for (const id of deviceIds) {
+        if (!password) continue;
+        try {
+          const enc = await this.storage.downloadFile(this.getDeviceInfoPath(id));
+          const dec = decryptBuffer(enc, password);
+          const info: DeviceInfo = JSON.parse(dec.toString('utf-8'));
+
+          const isHardwareMatch = info.machine_id && info.machine_id === currentMachineId;
+          const isHostnameMatch = !info.machine_id && info.hostname && (info.hostname.toLowerCase() === currentHostname.toLowerCase());
+
+          if (isHardwareMatch || isHostnameMatch) {
+            console.log(`[Device Identity] Recognized physical machine: adopting existing device '${id}' ('${info.name || id}')`);
+            adoptDevice(id, info.name || id);
+            return { adopted: true, deviceId: id, deviceName: info.name || id };
+          }
+        } catch {}
+      }
+    } catch {}
+
+    return { adopted: false, deviceId: this.getDeviceId(), deviceName: this.getDeviceName() };
+  }
+
   public async listAllDevices(password?: string): Promise<DeviceInfo[]> {
+    if (password) {
+      await this.autoAdoptExistingDevice(password);
+    }
+
     const deviceIds = await this.storage.listDevices();
     const result: DeviceInfo[] = [];
 
@@ -244,6 +281,9 @@ export class SynchronumSyncEngine {
     if (!deviceIds.includes(myId)) {
       deviceIds.push(myId);
     }
+
+    const currentMachineId = getMachineId();
+    const currentHostname = os.hostname().toLowerCase();
 
     for (const id of deviceIds) {
       let info: DeviceInfo | null = null;
@@ -255,18 +295,26 @@ export class SynchronumSyncEngine {
         } catch {}
       }
 
-      if (info) {
-        result.push(info);
-      } else {
-        result.push({
-          id,
-          name: id === myId ? this.getDeviceName() : id,
-          hostname: id,
-          platform: 'unknown',
-          updated_at: new Date().toISOString(),
-          sessions_count: 0,
-        });
+      const item: DeviceInfo = info || {
+        id,
+        name: id === myId ? this.getDeviceName() : id,
+        hostname: id,
+        platform: 'unknown',
+        updated_at: new Date().toISOString(),
+        sessions_count: 0,
+      };
+
+      // Deduplicate: avoid listing duplicate phantom profiles for this same physical computer
+      if (id !== myId) {
+        if (item.machine_id && item.machine_id === currentMachineId) {
+          continue;
+        }
+        if (!item.machine_id && item.hostname && item.hostname.toLowerCase() === currentHostname) {
+          continue;
+        }
       }
+
+      result.push(item);
     }
 
     return result;

@@ -55,6 +55,7 @@ export interface DeviceInfo {
   platform: string;
   updated_at: string;
   sessions_count: number;
+  machine_id?: string;
 }
 
 export interface EnhancedConversationSummary extends ConversationSummary {
